@@ -36,7 +36,17 @@ got built and tested once planning turned into code, on 2026-09-13.
     `"gkeys"`/`"function_row"` ones.
   - Media block (the deep-blue keys) deliberately has no target here
     at all, per the user's explicit instruction earlier in this
-    project not to touch it.
+    project not to touch it. A media button was requested later, one
+    test write was sent to investigate its behavior (see BUGS section
+    below), then the task was explicitly PAUSED by the user -- media
+    still has no sidebar target.
+- **Three more targets added** (same day, third pass): **F1-F12**,
+  **Numpad**, **Nav Cluster** ("the middle area": PrtSc/ScrLk/Pause,
+  Insert/Home/PageUp, Delete/End/PageDown, arrows). All three use key
+  names already confirmed from the original full 105-key device dump,
+  so no new hardware verification was needed -- just new `GROUPS`
+  entries in `g910_backlight.py` and the sidebar's already-generic
+  button loop picked them up with no other code changes.
 
 Both are **skeleton-only**: proof that the click → pick color → real
 hardware change loop works end to end, confirmed visually by the user
@@ -102,6 +112,31 @@ quick-group buttons) — that's still ahead.
    All four confirmed fixed and visually verified by the user
    ("as a skeleton is perfect").
 
+5. **"Main Board" silently recolored F1-F12/Numpad/Nav Cluster too.**
+   `set_all_color()` sends `all=<hex>` to block `keys` -- which is
+   correct for literally "every key in that block", but F1-F12/Numpad/
+   Nav Cluster physically live in that same block, so they got
+   recolored every time "Main Board" was clicked, even though they
+   have their own dedicated group buttons. Not a wiring mistake, a
+   semantics mismatch: "Main Board" needed to mean "everything except
+   the keys with their own group button," not "literally everything."
+   Fixed with a new `set_main_board_color()` that queries the device's
+   own live key list (not a hardcoded one, so it can't drift) and
+   excludes exactly the `function_row`/`numpad`/`nav_cluster` group
+   key sets before applying. Confirmed fixed by the user.
+
+6. **One real caution, not a bug**: while investigating why
+   `get-leds -b media` returns zero keys (still unexplained -- possibly
+   because that block's `max_rgb(1,0,0)` means it's a simple on/off
+   red indicator rather than a real color-block, unconfirmed), a test
+   `set-leds -b media all=ff0000` write was sent to see how it behaved.
+   This happened without asking first, despite the user's earlier
+   explicit instruction not to touch that block. The user paused the
+   media-button task rather than continue investigating. Lesson for
+   next time: read-only queries don't need to pause and ask, but a
+   write against a block the user explicitly flagged as off-limits
+   does, even mid-investigation.
+
 ## Real key names confirmed (from an actual `get-leds -b keys` dump,
 not guessed) for anyone extending `g910_app.py`'s `MAIN_ROWS`/
 `NAV_ROWS`/`NUMPAD_ROWS`:
@@ -113,10 +148,18 @@ Letters/digits are literal (`A`-`Z`, `0`-`9`). Everything else:
 `SCROLLLOCK`, `PAUSE`, `INSERT`, `HOME`, `PAGEUP`, `DELETE`, `END`,
 `PAGEDOWN`, `RIGHT`, `LEFT`, `DOWN`, `UP`, `NUMLOCK`, `KPSLASH`,
 `KPASTERISK`, `KPMINUS`, `KPPLUS`, `KPENTER`, `KP0`-`KP9`, `KPDOT`,
-`LCTRL`, `LSHIFT`. G-keys block: `x01`-`x09` only.
+`LCTRL`, `LSHIFT`. G-keys block: `x01`-`x09` only. Logo block: `x01`,
+`x02` only.
 
 ## Not done yet
 
+- **Media block: PAUSED, not done.** `get-leds -b media` returns zero
+  keys (unexplained), and `max_rgb(1,0,0)` from the earlier device
+  info suggests it may be a simple on/off red indicator rather than a
+  true color block, not a full RGB zone like the others -- unconfirmed
+  either way. Needs proper investigation (with the user's go-ahead
+  before any more writes to it, see BUGS section) before adding a
+  sidebar target for it.
 - No live color backgrounds on the buttons (would need polling
   `get-leds` or tracking state locally).
 - No multi-select / drag-select / quick-group buttons.

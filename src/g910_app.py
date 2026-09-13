@@ -94,11 +94,15 @@ class KeyButton(QPushButton):
             print(f"FAILED to set {self.key_name}: {err}")
 
 
-# target_name -> apply function taking a hex color string.
+# target_name -> apply function taking a hex color string. Media
+# deliberately excluded for now -- paused, see G910_SKELETON.md.
 COLOR_MODE_TARGETS = {
     "Logo": lambda hexcolor: bl.set_group_color("logo", hexcolor),
     "G-Keys": lambda hexcolor: bl.set_group_color("gkeys", hexcolor),
-    "Main Board": lambda hexcolor: bl.set_all_color(hexcolor),
+    "F1-F12": lambda hexcolor: bl.set_group_color("function_row", hexcolor),
+    "Numpad": lambda hexcolor: bl.set_group_color("numpad", hexcolor),
+    "Nav Cluster": lambda hexcolor: bl.set_group_color("nav_cluster", hexcolor),
+    "Main Board": lambda hexcolor: bl.set_main_board_color(hexcolor),
 }
 
 

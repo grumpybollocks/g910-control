@@ -29,6 +29,14 @@ GROUPS = {
     "function_row": ("keys", ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]),
     "gkeys": ("gkeys", [f"G{i}" for i in range(1, 10)]),
     "logo": ("logo", ["LOGO1", "LOGO2"]),
+    "numpad": ("keys", [
+        "NUMLOCK", "KPSLASH", "KPASTERISK", "KPMINUS", "KPPLUS", "KPENTER",
+        "KP1", "KP2", "KP3", "KP4", "KP5", "KP6", "KP7", "KP8", "KP9", "KP0", "KPDOT",
+    ]),
+    "nav_cluster": ("keys", [
+        "SYSRQ", "SCROLLLOCK", "PAUSE", "INSERT", "HOME", "PAGEUP",
+        "DELETE", "END", "PAGEDOWN", "RIGHT", "LEFT", "DOWN", "UP",
+    ]),
 }
 
 
@@ -56,6 +64,38 @@ def set_key_color(key_name, hex_color, block="keys"):
 
 def set_all_color(hex_color):
     return _run_set_leds("keys", [f"all={hex_color}"])
+
+
+def _all_key_names(block="keys"):
+    """Live list of every key name the device itself reports for a
+    block -- queried, not hardcoded, so it can't drift out of sync with
+    the real hardware."""
+    result = subprocess.run(
+        ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.split("=", 1)[0] for line in result.stdout.splitlines() if "=" in line]
+
+
+def set_main_board_color(hex_color):
+    """'Main Board' means everything in block "keys" EXCEPT the keys
+    that belong to their own dedicated group buttons (F1-F12, Numpad,
+    Nav Cluster) -- NOT literally every key in the block. Using the
+    "all" keyword here was a real bug: it silently recolored F1-F12/
+    Numpad/Nav Cluster too, since they physically live in the same
+    block, confirmed by the user seeing F-keys change color when they
+    only asked for Main Board."""
+    excluded = set()
+    for group_name in ("function_row", "numpad", "nav_cluster"):
+        _, keys = GROUPS[group_name]
+        excluded.update(keys)
+    remaining = [k for k in _all_key_names("keys") if k not in excluded]
+    if not remaining:
+        return False, "Couldn't read the current key list from the device."
+    directives = [f"{k}={hex_color}" for k in remaining]
+    return _run_set_leds("keys", directives)
 
 
 def set_group_color(group_name, hex_color):
