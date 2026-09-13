@@ -173,3 +173,37 @@ call) since there's no batching benefit at that scale.
    this rendering-layer rearchitecture either way.
 
 Nothing gets implemented until these are answered.
+
+## Planned (not yet built): Profiles tab
+
+Added to the plan 2026-09-14, per the user's request -- a third tab
+alongside Backlight and G-Keys.
+
+What it does: capture the CURRENT full lighting state (every key's
+color across every LED block -- keys/gkeys/logo, queried live via
+`keyledsctl get-leds` for each block) and save it as a named profile.
+Load a saved profile back later to instantly reapply that whole
+combination.
+
+Rough shape, not fully designed yet:
+- "Save Current as Profile" button, prompts for a name, snapshots
+  `get-leds -b keys` + `-b gkeys` + `-b logo` output (already have the
+  parsing logic for this in `g910_backlight._all_key_names`/
+  `get_key_color` -- reusable, not a new mechanism), stores it as a
+  named entry in a new file (`g910_profiles.json`, matching the
+  `g910_macros.json` naming convention already established).
+- A list of saved profiles (buttons or a dropdown), each with Load and
+  Delete.
+- Loading a profile replays it via `_run_set_leds`, block by block --
+  already-proven plumbing, no new hardware-facing code needed, this is
+  purely a save/list/load UI wrapping existing functions.
+- Open question, not yet decided: should Main Board's excluded inert
+  keys (Win/Alt/AltGr/Menu/right-Ctrl/right-Shift -- see the M-KEY/
+  inert-key work earlier) matter here at all? They can't be saved/
+  restored either way since they were never colorable, so this is
+  purely about whether the UI should show them as part of a "full
+  snapshot" cosmetically. Low priority, decide when actually building
+  this.
+- Does NOT need to touch feature 0x8070 (the hardware effects engine)
+  at all -- this is about the existing static-color "leds" feature
+  only, a snapshot of what's already controllable today.
