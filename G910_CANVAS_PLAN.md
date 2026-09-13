@@ -450,3 +450,43 @@ called done -- compiled (`py_compile`), smoke-tested (every tab
 class instantiated headless via `QT_QPA_PLATFORM=offscreen`), then
 launched for real and confirmed visually by the user at each step,
 per the "no more mistakes, verify yourself" standing rule.
+
+### Reboot-safety audit (2026-09-14)
+
+User asked directly: are we reboot-safe, are dependencies covered by
+an installer, are we done on this step? Verified each claim rather
+than assuming the earlier install work was sufficient:
+
+- **Dependencies**: `install-g910.sh` covers everything -- official
+  repo packages (PyQt5, python-evdev, ydotool, keyleds's AUR build
+  deps), the `keyleds` AUR package itself, `ydotool.service` enabled,
+  `g910-macro-daemon.service` installed+enabled. Confirmed live:
+  both services show `enabled`+`active` via `systemctl --user
+  is-enabled`/`is-active`.
+- **Hidraw permissions**: confirmed non-root access survives reboot
+  without any custom udev rule of our own -- the `keyleds` package
+  ships `/usr/lib/udev/rules.d/70-logitech-hidpp.rules`, which tags
+  the right interface with `uaccess` based on `idVendor`+
+  `bInterfaceProtocol` (not a hardcoded path). Confirmed via
+  `udevadm info`: `TAGS=:uaccess:seat:` on the live device.
+- **Real bug found and fixed**: `g910_backlight.py`'s `DEVICE` and
+  `g910_macro_daemon.py`'s `DEVICE_PATH` were hardcoded to
+  `/dev/hidraw1`. hidraw numbering is just enumeration order across
+  EVERY hidraw device on the system -- confirmed via `udevadm info`
+  on all 12 hidraw nodes present on this machine (2 mice, a headset,
+  this keyboard's own second interface all show up as hidrawN) -- not
+  guaranteed stable across reboots/replugs, same class of bug the
+  sibling G510s project already hit once with `/dev/hidrawN` before
+  switching to a stable symlink. Fixed the same way: confirmed a
+  stable `/dev/input/by-id/usb-..._G910_..._-if01-hidraw` symlink
+  already exists (auto-created by udev's own built-in rules, zero
+  custom rule needed -- same mechanism `g910_app.py`'s
+  `MAIN_KEYBOARD_DEVICE` already relied on), pointed both constants at
+  it instead. Verified live: `get_all_live_colors()` still reads all
+  115 keys through the new path, daemon restarted clean and still
+  responded to a real G-key/M-key press (both confirmed by the user).
+
+Conclusion: yes, reboot-safe now (this bug meant it previously was
+NOT, in the specific case where hidraw enumeration order shifted), and
+yes, `install-g910.sh` alone is sufficient for a fresh install -- no
+manual steps left outside it.
