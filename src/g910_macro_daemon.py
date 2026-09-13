@@ -32,7 +32,7 @@ import g910_backlight as bl
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 MACROS_FILE = PROJECT_DIR / "g910_macros.json"
-DEVICE_PATH = "/dev/hidraw1"
+DEVICE_PATH = bl.DEVICE  # stable by-id symlink, not a hardcoded hidrawN -- see g910_backlight.py's DEVICE comment
 
 # Real bug found and fixed via a live diagnostic capture: a single real
 # G5 press was followed by clean press/release pairs repeating every
