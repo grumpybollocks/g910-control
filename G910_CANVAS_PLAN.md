@@ -490,3 +490,104 @@ Conclusion: yes, reboot-safe now (this bug meant it previously was
 NOT, in the specific case where hidraw enumeration order shifted), and
 yes, `install-g910.sh` alone is sufficient for a fresh install -- no
 manual steps left outside it.
+
+### GUI overhaul: single unified view -- reached "v1" (2026-09-14)
+
+After the reboot-safety pass, the user wanted to actually redesign the
+GUI (previously 3 tabs: Backlight/G-Keys/Profiles) rather than keep
+adding features. Iterated live against the real running app,
+confirming each change visually before moving to the next -- nothing
+below was assumed to look right without the user actually seeing it.
+End state: **one single view, no tabs at all.**
+
+**Merged G-Keys and Profiles out of their own tabs, into the space
+around the canvas:**
+- `GKeysTab` (M1/M2/M3 + G1-G9 macro buttons) moved from its own tab
+  into a compact horizontal strip directly under the keyboard canvas
+  -- rewritten from a `QVBoxLayout` (title + description + profile row
+  + 3x3 grid) into a single `QHBoxLayout` row, since the space under
+  the canvas is only ~100px tall (canvas is 962x324, window was
+  460 tall) -- nowhere near enough for the old vertical layout.
+- `ProfilesTab` moved from its own tab into the empty space that was
+  left on the right of the window after G-Keys moved out from there.
+- `MainWindow` dropped `QTabWidget` entirely -- `BacklightTab` (now
+  containing the canvas + sidebar + G-Keys strip + Profiles panel) is
+  the sole central widget.
+- Each panel (`ColorModeSidebar`, `GKeysTab`, `ProfilesTab`) got
+  `objectName("Panel")` + a shared `QWidget#Panel` QSS rule (subtle
+  card background/border), separated by 1px `QFrame` vertical
+  dividers (`_vseparator()`), so the single view still reads as
+  distinct sections instead of one undifferentiated block.
+
+**Canvas got two new interactive features (both were explicit,
+separate feature requests, not just visual polish):**
+1. **M1/M2/M3/MR are now real, clickable cells on the canvas**, not
+   inert grey placeholders. `Cell` entries for them changed from
+   `block=None`-only to also carrying a real `key_name` (`_M1`.._MR`,
+   NOT a keyledsctl name -- these still have zero LED color mechanism,
+   confirmed empirically same as before) purely so the canvas can
+   identify them for click handling. New `KeyboardCanvas` signals
+   `mkey_clicked`/`zone_clicked`; clicking M1/M2/M3 calls
+   `GKeysTab.select_profile()` (same path as clicking its own
+   buttons, and physical M-key presses via the daemon's poll file --
+   one method, three input sources, always in sync), clicking MR
+   toggles `bl.set_mrkey_led()` same as the physical key. Active
+   profile/MR-on state highlighted directly on the canvas
+   (`ACTIVE_MKEY_COLOR`/`MR_ACTIVE_COLOR`) instead of only in the
+   G-Keys strip.
+2. **Clicking any key/cluster on the canvas auto-selects the matching
+   zone in the sidebar's list** (`zone_clicked` signal + new
+   `KEY_TO_ZONE` reverse map built from `ZONE_SELECTION_KEYS`). Had to
+   add a separate `ColorModeSidebar.sync_target()` instead of reusing
+   `select_target()` -- the existing method also calls
+   `canvas.select_keys()`, which would stomp the canvas's own
+   single-key selection (from the very click that triggered this) and
+   turn a plain single-key click into "recolor the whole zone" by
+   accident. `sync_target()` only updates the sidebar's own checked
+   state, nothing on the canvas.
+
+**Layout/sizing polish, several rounds of real user feedback each
+verified live before moving on:**
+- Sidebar zone buttons (`QPushButton#ZoneButton`): were left-aligned
+  in a fixed-width column, looked like long empty bars -- centered
+  text + tighter padding. Reused the same objectName for the G-Keys
+  strip's M/G buttons too (they had the identical "long empty
+  button" problem from the same root cause: global `QPushButton` QSS
+  is `text-align: left`).
+- M-key cells went through two size passes: first "half size" (0.45 x
+  0.5) was too small for even a 2-char label at the normal 9pt font
+  -- fixed with both a bigger cell (0.55 x 0.65) AND a dedicated
+  smaller font (`MKEY_FONT_PT = 6`) just for these four labels.
+  G6-G9 pushed right +0.6 columns to clear space from the M-keys
+  cluster to their left (no longer perfectly above F1-F4 as the
+  original comment described -- traded for the requested spacing).
+- Logo cell bumped ~15% bigger (1.05 x 1.15, was 0.9 x 1.0) -- pure
+  design choice, not a hardware constraint.
+- Real bug: the window was hardcoded to `resize(1500, 460)` from
+  earlier in the project. After all the panel changes the actual
+  content needed less width, leaving a real empty gap on the right of
+  the window. Fixed by dropping the hardcoded resize and calling
+  `self.adjustSize()` instead, so the window always matches real
+  content -- avoids this exact bug recurring the next time a panel's
+  width changes.
+- `KeyboardCanvas.main_board_pixel_span()` added so the G-Keys strip
+  centers under the actual keyboard block (M-keys/Logo/G-keys/main
+  board) specifically, not the whole canvas widget -- the canvas is
+  wider than that because Nav Cluster + Numpad extend further right
+  with a visual gap, so plain center-under-the-whole-canvas looked
+  off-center relative to the keyboard itself.
+
+**Desktop launcher added**: `install-g910.sh` now generates
+`~/Desktop/G910 Control.desktop` itself, from the install script's own
+resolved `$DIR` -- deliberately NOT hardcoding a path, unlike the
+sibling G510s project's `.desktop` files (found during the reboot-
+safety audit to be hardcoded to one specific machine/username and
+silently broken everywhere else). Verified live: the exact `Exec=`
+command from the generated file launches the app cleanly with no
+errors.
+
+All of the above compiled clean (`py_compile`) and smoke-tested
+(`QT_QPA_PLATFORM=offscreen`, every panel instantiated headless) before
+each real launch; every visual claim in this section was confirmed by
+the user actually looking at the running app, not assumed from the
+code.

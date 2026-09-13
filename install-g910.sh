@@ -59,6 +59,33 @@ systemctl --user daemon-reload
 systemctl --user enable --now g910-macro-daemon.service
 
 echo
+echo "=== Desktop launcher ==="
+# Written here with the REAL resolved $DIR, not a hardcoded path --
+# the sibling G510s project's install.sh assumes its .desktop files
+# already exist with the right path baked in by hand, which turned out
+# to be hardcoded to one specific machine/user and silently breaks
+# anywhere else (found during a reboot-safety audit). Generating it
+# here from $DIR avoids repeating that exact mistake.
+DESKTOP_FILE="$HOME/Desktop/G910 Control.desktop"
+mkdir -p "$HOME/Desktop"
+cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=G910 Control
+Comment=Logitech G910 Orion Spectrum RGB + macro control
+Exec=python3 "$DIR/src/g910_app.py"
+Path=$DIR/src
+Icon=input-keyboard
+Terminal=false
+Categories=Utility;
+EOF
+chmod +x "$DESKTOP_FILE"
+# GNOME/Nautilus also needs an explicit "trusted" flag or it shows an
+# "Untrusted application launcher" warning instead of running --
+# harmless no-op if gio isn't installed (e.g. KDE-only systems).
+command -v gio &>/dev/null && gio set "$DESKTOP_FILE" metadata::trusted true 2>/dev/null || true
+
+echo
 echo "=== Done ==="
 echo "Verify keyleds with: keyledsctl list"
 echo "Should show this G910 (046d:c335) at a /dev/hidrawN path. If the"

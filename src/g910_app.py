@@ -14,7 +14,9 @@ reading feature_leds.c directly, see G910_README.txt). So brightness
 here means what it means for any RGB device without one: scale the
 chosen color's R/G/B by the brightness percentage before sending.
 
-G-Keys tab: macro record/playback for G1-G9, switchable via M1/M2/M3
+G-Key Macros panel: embedded in the Backlight tab (to the right of the
+canvas, in what used to be empty space -- moved out of its own tab by
+request). Macro record/playback for G1-G9, switchable via M1/M2/M3
 profiles -- ports g510_app.py's proven RecorderThread/MacroRecordDialog
 pattern almost verbatim. Recording device confirmed empirically this
 session (not assumed): /dev/input/event2, stable by-id path below,
@@ -32,7 +34,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QPushButton, QColorDialog, QLabel, QSlider, QTabWidget,
-    QDialog, QLineEdit, QMessageBox, QInputDialog,
+    QDialog, QLineEdit, QMessageBox, QInputDialog, QFrame,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor
@@ -103,6 +105,21 @@ QLabel#Title {
     font-weight: 600;
     padding: 4px 2px 10px 2px;
 }
+QPushButton#ZoneButton {
+    text-align: center;
+    padding: 5px 10px;
+}
+QWidget#Panel {
+    background-color: #1c1c20;
+    border: 1px solid #2a2a30;
+    border-radius: 8px;
+}
+QFrame#Separator {
+    background-color: #2a2a30;
+    border: none;
+    max-width: 1px;
+    min-width: 1px;
+}
 QLabel#Status {
     color: #9a9aa2;
     font-size: 11px;
@@ -151,7 +168,8 @@ class ColorModeSidebar(QWidget):
         self.setFixedWidth(180)
 
         layout = QVBoxLayout()
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(4)
         title = QLabel("Color Mode")
         title.setObjectName("Title")
         layout.addWidget(title)
@@ -159,6 +177,7 @@ class ColorModeSidebar(QWidget):
         self.target_buttons = {}
         for name in ZONE_KEYS:
             btn = QPushButton(name)
+            btn.setObjectName("ZoneButton")
             btn.setCheckable(True)
             btn.clicked.connect(lambda _, n=name: self.select_target(n))
             layout.addWidget(btn)
@@ -205,6 +224,20 @@ class ColorModeSidebar(QWidget):
             btn.setChecked(n == name)
         self.canvas.select_keys(ZONE_SELECTION_KEYS[name])
 
+    def sync_target(self, name):
+        """Called when the CANVAS itself is clicked (a key/cluster),
+        to keep this list in sync with it -- unlike select_target, this
+        must NOT touch the canvas's own selection state. The canvas
+        already owns that from the very click that triggered this (its
+        own click-to-color-picker flow), so calling select_keys() here
+        would stomp the single-key selection with the whole zone and
+        make a plain click on one key recolor the entire zone instead."""
+        if name not in self.target_buttons:
+            return
+        self.current_target = name
+        for n, btn in self.target_buttons.items():
+            btn.setChecked(n == name)
+
     def on_apply(self):
         color = QColorDialog.getColor()
         if not color.isValid():
@@ -243,6 +276,13 @@ class ColorModeSidebar(QWidget):
         return False, f"Unknown target: {target}"
 
 
+def _vseparator():
+    line = QFrame()
+    line.setObjectName("Separator")
+    line.setFrameShape(QFrame.VLine)
+    return line
+
+
 class BacklightTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -253,11 +293,61 @@ class BacklightTab(QWidget):
 
         self.canvas = KeyboardCanvas()
         sidebar = ColorModeSidebar(self.canvas)
+        sidebar.setObjectName("Panel")
+        self.gkeys_panel = GKeysTab(self.canvas)
+        self.gkeys_panel.setObjectName("Panel")
+
+        # Canvas + G-Keys strip stacked in one column (the strip sits
+        # in what used to be empty space below the keyboard). Centered
+        # under the "keyboard proper" (M-keys/Logo/G-keys/main board),
+        # NOT the whole canvas widget -- the canvas is wider than that
+        # because Nav Cluster/Numpad extend further right, so plain
+        # AlignHCenter across the full widget looked off-center
+        # relative to the keyboard block itself.
+        canvas_column = QVBoxLayout()
+        canvas_column.setSpacing(10)
+        canvas_column.addWidget(self.canvas)
+
+        board_left, board_right = self.canvas.main_board_pixel_span()
+        board_center = (board_left + board_right) / 2
+        gkeys_width = self.gkeys_panel.sizeHint().width()
+        left_margin = max(0, round(board_center - gkeys_width / 2))
+        gkeys_row = QHBoxLayout()
+        gkeys_row.addSpacing(left_margin)
+        gkeys_row.addWidget(self.gkeys_panel)
+        gkeys_row.addStretch()
+        canvas_column.addLayout(gkeys_row)
+        canvas_column.addStretch()
+
+        self.profiles_panel = ProfilesTab(self.canvas)
+        self.profiles_panel.setObjectName("Panel")
+        self.profiles_panel.setFixedWidth(220)
+
         outer.addWidget(sidebar)
-        outer.addWidget(self.canvas)
+        outer.addWidget(_vseparator())
+        outer.addLayout(canvas_column)
+        outer.addWidget(_vseparator())
+        outer.addWidget(self.profiles_panel)
+
+        self._mr_active = False
+        self.canvas.zone_clicked.connect(sidebar.sync_target)
+        self.canvas.mkey_clicked.connect(self.on_mkey_clicked)
+
+    def on_mkey_clicked(self, name):
+        if name == "MR":
+            self._mr_active = not self._mr_active
+            ok, err = bl.set_mrkey_led(self._mr_active)
+            if not ok:
+                print(f"FAILED to toggle MR LED: {err}")
+                self._mr_active = not self._mr_active  # revert, the LED didn't actually change
+                return
+            self.canvas.set_mr_active(self._mr_active)
+        else:
+            self.gkeys_panel.select_profile(name)
 
 
-# --- G-Keys tab (ported from g510_app.py's proven pattern) -------------
+# --- G-Key Macros panel (embedded in Backlight tab; ported from
+# g510_app.py's proven pattern) --------------------------------------
 
 def load_macros():
     if MACROS_FILE.exists():
@@ -422,55 +512,51 @@ class MacroRecordDialog(QDialog):
 
 
 class GKeysTab(QWidget):
-    """G1-G9 macro grid, switchable via M1/M2/M3 profiles. MR is
-    intentionally NOT a profile here -- it's a literal macro-record
-    toggle for the future physical-key-driven daemon, not a 4th GUI
-    profile (the user's explicit decision earlier in this project)."""
-    def __init__(self):
+    """M1/M2/M3 profile toggle + G1-G9 macro buttons, as a single
+    compact horizontal strip -- lives directly under the canvas (see
+    BacklightTab), not in its own tab/panel, so it has to be short.
+    MR is intentionally NOT a profile here -- it's a literal
+    macro-record toggle for the future physical-key-driven daemon, not
+    a 4th GUI profile (the user's explicit decision earlier in this
+    project)."""
+    def __init__(self, canvas=None):
         super().__init__()
+        self.canvas = canvas
         self.current_profile = "M1"
-        layout = QVBoxLayout()
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
 
-        title = QLabel("G-Key Macros")
-        title.setObjectName("Title")
-        layout.addWidget(title)
-        layout.addWidget(QLabel("Click a key to record/assign a macro."))
+        label = QLabel("G-Keys")
+        layout.addWidget(label)
+        layout.addSpacing(12)
 
-        layout.addSpacing(10)
-        profile_row = QHBoxLayout()
-        profile_row.setSpacing(12)
-        profile_row.addStretch()
         self.profile_buttons = {}
         for name in ("M1", "M2", "M3"):
             btn = QPushButton(name)
+            btn.setObjectName("ZoneButton")
             btn.setCheckable(True)
+            btn.setFixedWidth(42)
             btn.clicked.connect(lambda _, n=name: self.select_profile(n))
-            profile_row.addWidget(btn)
+            layout.addWidget(btn)
             self.profile_buttons[name] = btn
-        profile_row.addStretch()
-        self.profile_buttons["M1"].setChecked(True)
-        bl.set_mkey_led("M1")
-        layout.addLayout(profile_row)
-        layout.addSpacing(16)
 
-        grid = QGridLayout()
-        grid.setSpacing(8)
+        layout.addSpacing(12)
+        layout.addWidget(_vseparator())
+        layout.addSpacing(12)
+
         self.key_buttons = {}
         for i in range(1, 10):
             name = f"G{i}"
             btn = QPushButton(name)
+            btn.setObjectName("ZoneButton")
+            btn.setFixedWidth(46)
             btn.clicked.connect(lambda _, n=name: self.open_key_dialog(n))
-            grid.addWidget(btn, (i - 1) // 3, (i - 1) % 3)
+            layout.addWidget(btn)
             self.key_buttons[name] = btn
-        grid_wrap = QHBoxLayout()
-        grid_wrap.addStretch()
-        grid_wrap.addLayout(grid)
-        grid_wrap.addStretch()
-        layout.addLayout(grid_wrap)
 
-        layout.addStretch()
         self.setLayout(layout)
+        self.select_profile("M1")  # also lights the LED + syncs the canvas highlight
 
         # Physical M1/M2/M3 presses go through g910_macro_daemon.py
         # (not this app -- confirmed there's no listener here at all,
@@ -489,6 +575,8 @@ class GKeysTab(QWidget):
         ok, err = bl.set_mkey_led(name)
         if not ok:
             print(f"FAILED to light {name} LED: {err}")
+        if self.canvas is not None:
+            self.canvas.set_active_mkey(name)
 
     def poll_active_profile(self):
         import os
@@ -527,7 +615,6 @@ class ProfilesTab(QWidget):
         title = QLabel("Profiles")
         title.setObjectName("Title")
         layout.addWidget(title)
-        layout.addWidget(QLabel("Save the current lighting as a named profile, or load one back."))
 
         layout.addSpacing(10)
         save_btn = QPushButton("Save Current as Profile...")
@@ -616,15 +703,21 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("G910 Control")
-        self.resize(1500, 460)
         self.setStyleSheet(STYLESHEET)
 
-        tabs = QTabWidget()
-        backlight_tab = BacklightTab()
-        tabs.addTab(backlight_tab, "Backlight")
-        tabs.addTab(GKeysTab(), "G-Keys")
-        tabs.addTab(ProfilesTab(backlight_tab.canvas), "Profiles")
-        self.setCentralWidget(tabs)
+        # No tabs anymore -- Backlight/G-Keys/Profiles are all one
+        # single view now (G-Keys and Profiles used to be separate
+        # tabs, moved in one at a time into what used to be empty
+        # space around the canvas, by request).
+        self.setCentralWidget(BacklightTab())
+
+        # Size to the actual content instead of a hardcoded guess --
+        # was 1500x460, but the real layout needs less width than that
+        # (left a real, visible empty gap on the right of the window).
+        # adjustSize() sizes to the layout's real sizeHint, so this
+        # keeps tracking reality as panels change instead of rotting
+        # into another stale hardcoded number.
+        self.adjustSize()
 
 
 if __name__ == "__main__":
