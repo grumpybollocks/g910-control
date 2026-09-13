@@ -52,6 +52,13 @@ echo "=== ydotoold: enabling the replay daemon's own background service ==="
 systemctl --user enable --now ydotool.service
 
 echo
+echo "=== systemd --user service: g910-macro-daemon (G-key/M-key playback) ==="
+mkdir -p ~/.config/systemd/user
+cp services/g910-macro-daemon.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now g910-macro-daemon.service
+
+echo
 echo "=== Done ==="
 echo "Verify keyleds with: keyledsctl list"
 echo "Should show this G910 (046d:c335) at a /dev/hidrawN path. If the"
@@ -60,3 +67,5 @@ echo "  sudo udevadm control --reload && sudo udevadm trigger"
 echo
 echo "Verify ydotool with: ydotool key 28:1 28:0   (should send an Enter"
 echo "keypress wherever your cursor currently has focus)"
+echo
+echo "Verify the macro daemon with: systemctl --user status g910-macro-daemon.service"

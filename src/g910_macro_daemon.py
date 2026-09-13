@@ -23,6 +23,7 @@ import json
 import os
 import select
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -63,12 +64,17 @@ def replay(entry):
     never block the read loop and delay/miss the next real HID++
     report -- confirmed this matters: subprocess.run() here used to
     run inline on the same thread that reads M-key presses too."""
-    if isinstance(entry, str):  # legacy/bare-string format, pre-command-support
-        subprocess.run(["ydotool", "key"] + entry.split())
-    elif entry.get("type") == "command":
-        subprocess.run(entry["value"], shell=True)
-    else:  # type == "keys"
-        subprocess.run(["ydotool", "key"] + entry["value"].split())
+    try:
+        if isinstance(entry, str):  # legacy/bare-string format, pre-command-support
+            result = subprocess.run(["ydotool", "key"] + entry.split(), capture_output=True, text=True)
+        elif entry.get("type") == "command":
+            result = subprocess.run(entry["value"], shell=True, capture_output=True, text=True)
+        else:  # type == "keys"
+            result = subprocess.run(["ydotool", "key"] + entry["value"].split(), capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"replay FAILED (exit {result.returncode}): {result.stderr.strip()}", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"replay FAILED with exception: {e!r}", file=sys.stderr, flush=True)
 
 
 def decode_report(data):
@@ -110,12 +116,18 @@ def main():
     # earlier this project (a capture attempt with zero setup produced
     # zero bytes). Must be re-run every daemon start, it's a live
     # device-mode toggle, not a persisted setting.
-    subprocess.run(["keyledsctl", "gkeys", "-d", DEVICE_PATH, "on"])
+    gkeys_on = subprocess.run(["keyledsctl", "gkeys", "-d", DEVICE_PATH, "on"], capture_output=True, text=True)
+    if gkeys_on.returncode != 0:
+        print(f"WARNING: 'keyledsctl gkeys on' failed (exit {gkeys_on.returncode}): "
+              f"{gkeys_on.stderr.strip()} -- G-key presses will NOT be detected until this succeeds.",
+              file=sys.stderr, flush=True)
 
     active_profile = "M1"
     recording_armed = False
     write_active_profile(active_profile)
-    bl.set_mkey_led(active_profile)
+    ok, err = bl.set_mkey_led(active_profile)
+    if not ok:
+        print(f"WARNING: startup set_mkey_led({active_profile}) failed: {err}", file=sys.stderr, flush=True)
 
     last_trigger = {}  # key_name -> time.monotonic() of last accepted press
 
@@ -143,10 +155,14 @@ def main():
             if kind == "mkey":
                 active_profile = name
                 write_active_profile(active_profile)
-                bl.set_mkey_led(active_profile)
+                ok, err = bl.set_mkey_led(active_profile)
+                if not ok:
+                    print(f"WARNING: set_mkey_led({active_profile}) failed: {err}", file=sys.stderr, flush=True)
             elif kind == "mrkey":
                 recording_armed = not recording_armed
-                bl.set_mrkey_led(recording_armed)
+                ok, err = bl.set_mrkey_led(recording_armed)
+                if not ok:
+                    print(f"WARNING: set_mrkey_led({recording_armed}) failed: {err}", file=sys.stderr, flush=True)
             elif kind == "gkey":
                 macros = load_macros()  # reload each time -- app may have just saved a new one
                 entry = macros.get(active_profile, {}).get(name)
