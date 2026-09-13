@@ -20,12 +20,15 @@ DEVICE = "/dev/hidraw1"
 # G-keys (block "gkeys") use a DIFFERENT key-naming scheme than the main
 # board (block "keys") -- confirmed empirically: "G1" is rejected, the
 # real names are x01..x09. This map translates our friendly "G1".."G9"
-# to what keyledsctl actually accepts for that block.
+# to what keyledsctl actually accepts for that block. The logo block
+# uses the same x01/x02 convention (confirmed via get-leds -b logo).
 GKEY_NAMES = {f"G{i}": f"x{i:02d}" for i in range(1, 10)}
+LOGO_NAMES = {"LOGO1": "x01", "LOGO2": "x02"}
 
 GROUPS = {
     "function_row": ("keys", ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]),
     "gkeys": ("gkeys", [f"G{i}" for i in range(1, 10)]),
+    "logo": ("logo", ["LOGO1", "LOGO2"]),
 }
 
 
@@ -39,7 +42,11 @@ def _run_set_leds(block, directives):
 
 
 def _real_key_name(block, key_name):
-    return GKEY_NAMES.get(key_name, key_name) if block == "gkeys" else key_name
+    if block == "gkeys":
+        return GKEY_NAMES.get(key_name, key_name)
+    if block == "logo":
+        return LOGO_NAMES.get(key_name, key_name)
+    return key_name
 
 
 def set_key_color(key_name, hex_color, block="keys"):

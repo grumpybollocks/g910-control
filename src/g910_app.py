@@ -11,7 +11,8 @@ skeleton is proven solid. See G910_README.txt for the full plan.
 """
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QGridLayout, QPushButton, QColorDialog,
+    QApplication, QMainWindow, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout,
+    QPushButton, QColorDialog, QLabel,
 )
 
 import g910_backlight as bl
@@ -93,17 +94,82 @@ class KeyButton(QPushButton):
             print(f"FAILED to set {self.key_name}: {err}")
 
 
+# target_name -> apply function taking a hex color string.
+COLOR_MODE_TARGETS = {
+    "Logo": lambda hexcolor: bl.set_group_color("logo", hexcolor),
+    "G-Keys": lambda hexcolor: bl.set_group_color("gkeys", hexcolor),
+    "Main Board": lambda hexcolor: bl.set_all_color(hexcolor),
+}
+
+
+class ColorModeSidebar(QWidget):
+    """Select a target (Logo / G-Keys / Main Board), pick a color, Apply
+    it to that whole group at once -- separate from clicking individual
+    keys on the keyboard grid."""
+    def __init__(self):
+        super().__init__()
+        self.current_target = "Logo"
+        self.setFixedWidth(160)
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("<b>Color Mode</b>"))
+
+        self.target_buttons = {}
+        for name in COLOR_MODE_TARGETS:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _, n=name: self.select_target(n))
+            layout.addWidget(btn)
+            self.target_buttons[name] = btn
+        self.target_buttons[self.current_target].setChecked(True)
+
+        layout.addSpacing(16)
+        apply_btn = QPushButton("Pick Color && Apply")
+        apply_btn.clicked.connect(self.on_apply)
+        layout.addWidget(apply_btn)
+
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+        self.setLayout(layout)
+
+    def select_target(self, name):
+        self.current_target = name
+        for n, btn in self.target_buttons.items():
+            btn.setChecked(n == name)
+
+    def on_apply(self):
+        color = QColorDialog.getColor()
+        if not color.isValid():
+            return
+        hexcolor = color.name().lstrip("#")
+        ok, err = COLOR_MODE_TARGETS[self.current_target](hexcolor)
+        if ok:
+            self.status_label.setText(f"{self.current_target} set to #{hexcolor}")
+        else:
+            self.status_label.setText(f"FAILED: {err}")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("G910 Control -- SKELETON (not final)")
-        self.resize(1900, 500)
+        self.resize(2050, 500)
 
         central = QWidget()
+        outer = QHBoxLayout()
+        central.setLayout(outer)
+        self.setCentralWidget(central)
+
+        outer.addWidget(ColorModeSidebar())
+
+        keyboard_widget = QWidget()
         grid = QGridLayout()
         grid.setSpacing(4)
-        central.setLayout(grid)
-        self.setCentralWidget(central)
+        keyboard_widget.setLayout(grid)
+        outer.addWidget(keyboard_widget)
 
         # M1/M2/M3/MR -- top-left, not color-wired yet (block=None)
         for col, name in enumerate(MKEYS):

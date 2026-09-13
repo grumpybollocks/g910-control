@@ -16,8 +16,27 @@ got built and tested once planning turned into code, on 2026-09-13.
   left column, G6-G9 top row above F1-F4, M1/M2/M3/MR row, full main
   board + nav cluster + numpad), click a key → `QColorDialog` → color
   applied live via `g910_backlight`. Deliberately unstyled — no live
-  color backgrounds, no multi-select, no groups UI yet. That's the
-  next phase, not this one.
+  color backgrounds, no multi-select yet. That polish is still ahead.
+- **Color Mode sidebar** (added same day, second pass): a left sidebar
+  next to the keyboard grid — three target buttons (**Logo**,
+  **G-Keys**, **Main Board**) + a **Pick Color & Apply** button. Click
+  a target, pick a color, apply it to that whole group in one action —
+  bulk coloring, distinct from clicking individual keys. Confirmed
+  working end-to-end by the user ("worked perfectly") for all three
+  targets.
+  - Required one more empirical check before building: the **Logo**
+    block's real key naming was unverified until now. Confirmed via
+    `keyledsctl get-leds -d /dev/hidraw1 -b logo` that it uses the same
+    `x01`/`x02` convention as G-keys (not literal names) — 2 keys.
+    Added a `LOGO_NAMES` translation map in `g910_backlight.py`,
+    mirroring the existing `GKEY_NAMES` one.
+  - "Main Board" reuses the already-proven `set_all_color()`. "Logo"
+    and "G-Keys" both go through `set_group_color()`, now with a
+    `"logo"` entry added to `GROUPS` alongside the existing
+    `"gkeys"`/`"function_row"` ones.
+  - Media block (the deep-blue keys) deliberately has no target here
+    at all, per the user's explicit instruction earlier in this
+    project not to touch it.
 
 Both are **skeleton-only**: proof that the click → pick color → real
 hardware change loop works end to end, confirmed visually by the user
