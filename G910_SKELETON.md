@@ -137,6 +137,37 @@ quick-group buttons) — that's still ahead.
    write against a block the user explicitly flagged as off-limits
    does, even mid-investigation.
 
+## Audit pass (2026-09-13, third pass) -- reviewed both files line by
+line for bugs before calling this skeleton solid, per the user's
+request:
+
+7. **Confirmed, not just suspected: the duplicate `BACKSLASH` entry
+   has one permanently-inert phantom zone.** Tested directly: wrote
+   `BACKSLASH=00ff00`, read back, and only the SECOND `BACKSLASH` entry
+   changed -- the first stayed `#000000`, exactly as it did even back
+   during the very first whole-keyboard `all=ff0000` test earlier in
+   this session (it never responded to that either). Likely a leftover
+   ISO/JIS key-table slot not physically present on this ANSI unit.
+   Confirmed harmless: `keyledsctl`'s plain `BACKSLASH=` targets the
+   real, addressable zone by default -- the GUI's `\` button was
+   already correct without any change needed. `_all_key_names()` now
+   dedupes the device's key list (`dict.fromkeys`) so
+   `set_main_board_color()` doesn't send that phantom zone's directive
+   twice -- harmless before, just tidier now.
+8. **Minor consistency gap, not a functional bug**: the CLI's `all`
+   action still means literally every key in block `keys` (unchanged,
+   still useful as a real "wipe everything" diagnostic), while the
+   GUI's "Main Board" button now means something narrower (excludes
+   F1-F12/Numpad/Nav Cluster). These are two intentionally different,
+   both-legitimate operations that happened to share a name mentally --
+   added a separate `main_board` CLI action so both are reachable and
+   clearly distinct, rather than silently changing what `all` means.
+
+No other bugs found in this pass -- both files compile cleanly
+(`python3 -m py_compile`), and the grid-layout math, block-naming
+translations, and group definitions were all re-traced and checked
+against real device output rather than re-skimmed.
+
 ## Real key names confirmed (from an actual `get-leds -b keys` dump,
 not guessed) for anyone extending `g910_app.py`'s `MAIN_ROWS`/
 `NAV_ROWS`/`NUMPAD_ROWS`:

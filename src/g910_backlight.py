@@ -69,14 +69,19 @@ def set_all_color(hex_color):
 def _all_key_names(block="keys"):
     """Live list of every key name the device itself reports for a
     block -- queried, not hardcoded, so it can't drift out of sync with
-    the real hardware."""
+    the real hardware. Deduped: "keys" lists BACKSLASH twice (one
+    permanently-inert phantom zone, confirmed by testing -- it never
+    changes color even on a whole-keyboard write -- plus the one real,
+    addressable zone). Sending the same key twice in one set-leds call
+    is harmless but pointless."""
     result = subprocess.run(
         ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
         return []
-    return [line.split("=", 1)[0] for line in result.stdout.splitlines() if "=" in line]
+    names = [line.split("=", 1)[0] for line in result.stdout.splitlines() if "=" in line]
+    return list(dict.fromkeys(names))
 
 
 def set_main_board_color(hex_color):
@@ -127,7 +132,8 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  g910_backlight.py all <hexcolor>")
+        print("  g910_backlight.py all <hexcolor>          (literally every key in block 'keys')")
+        print("  g910_backlight.py main_board <hexcolor>   (block 'keys' MINUS F1-F12/Numpad/Nav Cluster)")
         print("  g910_backlight.py key <KEYNAME> <hexcolor>")
         print("  g910_backlight.py group <groupname> <hexcolor>")
         print(f"  known groups: {list(GROUPS.keys())}")
@@ -136,6 +142,8 @@ if __name__ == "__main__":
     action = sys.argv[1]
     if action == "all":
         ok, err = set_all_color(sys.argv[2])
+    elif action == "main_board":
+        ok, err = set_main_board_color(sys.argv[2])
     elif action == "key":
         ok, err = set_key_color(sys.argv[2], sys.argv[3])
     elif action == "group":
