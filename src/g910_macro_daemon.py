@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Watches the G910's G1-G9/M1-M3/MR via raw HID++ reports on hidraw1 (no
-evdev keycodes exist for these -- confirmed empirically, see
+Watches the G910's G1-G9/M1-M3/MR via raw HID++ reports on the
+keyboard's HID++ hidraw interface (DEVICE_PATH, see g910_backlight.py
+-- no evdev keycodes exist for these -- confirmed empirically, see
 G910_README.txt's G-KEY/M-KEY/MR PROTOCOL section) and replays recorded
 macros via ydotool. Mirrors the sibling G510s project's
 g510_macro_daemon.py (same replay mechanism, same macro file format,
