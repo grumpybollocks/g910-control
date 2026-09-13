@@ -32,9 +32,9 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QPushButton, QColorDialog, QLabel, QSlider, QTabWidget,
-    QDialog, QLineEdit, QMessageBox,
+    QDialog, QLineEdit, QMessageBox, QInputDialog,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor
 import evdev
 from evdev import ecodes
@@ -486,6 +486,107 @@ class GKeysTab(QWidget):
         dlg.exec_()
 
 
+# --- Profiles tab: save/load full lighting snapshots -------------------
+
+class ProfilesTab(QWidget):
+    """Save the CURRENT live color of every key (across keys/gkeys/logo
+    -- media excluded, see g910_backlight.PROFILE_BLOCKS) as a named
+    profile; load a saved one back to instantly reapply that whole
+    combination. Backend already verified directly against the real
+    device before this UI was wired to it -- save/load/delete/list all
+    confirmed working (real snapshot captured, real color match
+    confirmed after replay)."""
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(14, 14, 14, 14)
+
+        title = QLabel("Profiles")
+        title.setObjectName("Title")
+        layout.addWidget(title)
+        layout.addWidget(QLabel("Save the current lighting as a named profile, or load one back."))
+
+        layout.addSpacing(10)
+        save_btn = QPushButton("Save Current as Profile...")
+        save_btn.clicked.connect(self.on_save)
+        layout.addWidget(save_btn)
+
+        layout.addSpacing(16)
+        layout.addWidget(QLabel("<b>Saved profiles</b>"))
+        self.list_layout = QVBoxLayout()
+        layout.addLayout(self.list_layout)
+
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("Status")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+        self.setLayout(layout)
+
+        self.refresh_list()
+
+    def refresh_list(self):
+        while self.list_layout.count():
+            item = self.list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        names = bl.list_profiles()
+        if not names:
+            self.list_layout.addWidget(QLabel("No profiles saved yet."))
+            return
+        for name in names:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(name))
+            row.addStretch()
+            load_btn = QPushButton("Load")
+            load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
+            delete_btn = QPushButton("Delete")
+            delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
+            row.addWidget(load_btn)
+            row.addWidget(delete_btn)
+            container = QWidget()
+            container.setLayout(row)
+            self.list_layout.addWidget(container)
+
+    def on_save(self):
+        name, ok = QInputDialog.getText(self, "Save Profile", "Profile name:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name in bl.list_profiles():
+            confirm = QMessageBox.question(
+                self, "Overwrite?", f'A profile named "{name}" already exists. Overwrite it?',
+            )
+            if confirm != QMessageBox.Yes:
+                return
+        success, err = bl.save_profile(name)
+        if success:
+            self.status_label.setText(f'Saved current lighting as "{name}".')
+            self.refresh_list()
+        else:
+            self.status_label.setText(f"FAILED: {err}")
+
+    def on_load(self, name):
+        success, err = bl.load_profile(name)
+        if success:
+            self.status_label.setText(f'Loaded "{name}".')
+        else:
+            self.status_label.setText(f"FAILED: {err}")
+
+    def on_delete(self, name):
+        confirm = QMessageBox.question(self, "Delete profile?", f'Delete "{name}"?')
+        if confirm != QMessageBox.Yes:
+            return
+        success, err = bl.delete_profile(name)
+        if success:
+            self.status_label.setText(f'Deleted "{name}".')
+            self.refresh_list()
+        else:
+            self.status_label.setText(f"FAILED: {err}")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -496,6 +597,7 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(BacklightTab(), "Backlight")
         tabs.addTab(GKeysTab(), "G-Keys")
+        tabs.addTab(ProfilesTab(), "Profiles")
         self.setCentralWidget(tabs)
 
 

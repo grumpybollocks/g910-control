@@ -14,9 +14,16 @@ Solaar-derived layout geometry from planning) -- just enough to prove
 layout data.
 """
 import ctypes
+import json
 import subprocess
+from pathlib import Path
 
 DEVICE = "/dev/hidraw1"
+PROFILES_FILE = Path(__file__).resolve().parent.parent / "g910_profiles.json"
+# Blocks a full lighting snapshot covers. "media" deliberately excluded
+# -- paused per the user's explicit instruction not to touch it, see
+# G910_SKELETON.md.
+PROFILE_BLOCKS = ("keys", "gkeys", "logo")
 
 # M-key/MR indicator LEDs are NOT controlled through keyledsctl (it has
 # no subcommand for this at all -- confirmed by reading
@@ -179,6 +186,80 @@ def get_key_color(key_name, block="keys"):
         if k == real_name:
             return v
     return None
+
+
+def _get_block_colors(block):
+    """{real_key_name: hexcolor} for every key currently reported by
+    the device in this block -- read-only, live query, same source as
+    _all_key_names/get_key_color."""
+    result = subprocess.run(
+        ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return {}
+    colors = {}
+    for line in result.stdout.splitlines():
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        colors[k] = v  # last one wins for the phantom duplicate BACKSLASH entry, harmless
+    return colors
+
+
+def load_profiles():
+    if PROFILES_FILE.exists():
+        try:
+            return json.loads(PROFILES_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def list_profiles():
+    return list(load_profiles().keys())
+
+
+def save_profile(name):
+    """Snapshots the CURRENT live color of every key across
+    PROFILE_BLOCKS (keys/gkeys/logo -- media excluded, see
+    PROFILE_BLOCKS comment) and stores it under `name`, overwriting any
+    existing profile with that name."""
+    snapshot = {block: _get_block_colors(block) for block in PROFILE_BLOCKS}
+    if not any(snapshot.values()):
+        return False, "Couldn't read any key colors from the device."
+    profiles = load_profiles()
+    profiles[name] = snapshot
+    PROFILES_FILE.write_text(json.dumps(profiles, indent=2))
+    return True, None
+
+
+def load_profile(name):
+    """Replays a saved profile block by block. Real key names stored
+    in the snapshot (block "gkeys"/"logo" already use their real x01..
+    names from the live query, not our friendly G1../LOGO1 aliases) --
+    no _real_key_name() translation needed on the way back out."""
+    profiles = load_profiles()
+    snapshot = profiles.get(name)
+    if snapshot is None:
+        return False, f"No such profile: {name}"
+    for block, colors in snapshot.items():
+        if not colors:
+            continue
+        directives = [f"{key}={color}" for key, color in colors.items()]
+        ok, err = _run_set_leds(block, directives)
+        if not ok:
+            return False, f"Failed applying block '{block}': {err}"
+    return True, None
+
+
+def delete_profile(name):
+    profiles = load_profiles()
+    if name not in profiles:
+        return False, f"No such profile: {name}"
+    del profiles[name]
+    PROFILES_FILE.write_text(json.dumps(profiles, indent=2))
+    return True, None
 
 
 if __name__ == "__main__":
