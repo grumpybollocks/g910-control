@@ -272,3 +272,34 @@ already reverse-engineered and documented in `G910_README.txt`.
   scoped to the keyboard's own LEDs). Get explicit go-ahead before
   installing `ydotool` and running this daemon against the live
   keyboard, not just before writing the code.
+
+### Daemon: CONFIRMED WORKING end-to-end on real hardware (2026-09-14)
+
+User installed `ydotool` + enabled its service, then live-tested
+against the real keyboard, in a safe isolated scratch window (a
+Konsole running `cat`, so replayed macros couldn't land in an
+unintended context).
+
+First live run immediately surfaced a real bug: physical M-key LEDs
+"went crazy," all three appearing to blink. Root-caused via a
+purpose-built read-only diagnostic (logs every raw report, zero
+hardware writes) rather than guessed at -- a single real G5 press was
+followed by clean press/release pairs repeating every 100-400ms for
+2.5+ seconds straight, confirmed via actual hidraw timestamps. That's
+the keyboard firmware's own key-repeat behavior (same thing that makes
+a held letter key auto-type), which the daemon had zero protection
+against -- it replayed the macro on every single repeat. Fixed with a
+per-key cooldown (`COOLDOWN_SECONDS`) plus moving macro replay onto
+its own thread so a slow replay could never block the read loop and
+delay/miss a genuine M-key press arriving during that window (a real,
+separate contributing issue, not just the repeat flood).
+
+Re-tested after the fix: G5 macro replay confirmed clean (typed "test"
+correctly, no flooding, tested twice). M1/M2/M3 profile switching
+confirmed reliable. Both confirmed directly by the user on the real
+keyboard, not assumed from the code fix alone.
+
+Still not done: no systemd --user service for the daemon (manual run
+only, doesn't survive logout/reboot), MR's behavior beyond its own LED
+toggle still undefined, and the Profiles tab (see above) is still only
+planned, not built.
