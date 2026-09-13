@@ -16,6 +16,7 @@ layout data.
 import ctypes
 import json
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 DEVICE = "/dev/hidraw1"
@@ -144,23 +145,55 @@ def _all_key_names(block="keys"):
     return list(dict.fromkeys(names))
 
 
-def set_main_board_color(hex_color):
-    """'Main Board' means everything in block "keys" EXCEPT the keys
-    that belong to their own dedicated group buttons (F1-F12, Numpad,
-    Nav Cluster) -- NOT literally every key in the block. Using the
-    "all" keyword here was a real bug: it silently recolored F1-F12/
-    Numpad/Nav Cluster too, since they physically live in the same
-    block, confirmed by the user seeing F-keys change color when they
-    only asked for Main Board."""
+def _excluded_from_main_board():
     excluded = set()
     for group_name in ("function_row", "numpad", "nav_cluster"):
         _, keys = GROUPS[group_name]
         excluded.update(keys)
-    remaining = [k for k in _all_key_names("keys") if k not in excluded]
-    if not remaining:
+    return excluded
+
+
+def set_main_board_color(hex_color):
+    """'Main Board' means every colorable key in block "keys" EXCEPT
+    the keys that belong to their own dedicated group buttons
+    (F1-F12, Numpad, Nav Cluster) -- NOT literally every key.
+
+    Real correction found via the user's own testing, not assumed:
+    Win/Alt/AltGr/Menu/right-Ctrl/right-Shift have no INDIVIDUAL LED
+    (confirmed empirically much earlier -- they never appear in
+    get-leds's per-key listing, and addressing them by name is
+    rejected), but they DO respond to the whole-block "all=" fill --
+    confirmed live: sending all=00ff00 turned them green along with
+    everything else. Different underlying HID++ function
+    (keyleds_set_led_block, a uniform block fill) than per-key
+    directives (keyleds_set_leds) -- keyledsctl's "all=" keyword uses
+    the block-fill function, confirmed by reading
+    keyledsctl_set_leds.c's real source directly.
+
+    So Main Board now reaches those keys too: snapshot F1-F12/Numpad/
+    Nav Cluster's CURRENT colors first, do the whole-block fill
+    (which reaches everything including the previously-unreachable
+    keys), then restore just those three groups back to what they
+    were -- undoing the fill's side effect on the keys that have their
+    own dedicated buttons, without losing the ability to color
+    everything else."""
+    excluded = _excluded_from_main_board()
+
+    current = _get_block_colors("keys")
+    if not current:
         return False, "Couldn't read the current key list from the device."
-    directives = [f"{k}={hex_color}" for k in remaining]
-    return _run_set_leds("keys", directives)
+    preserve = {k: v for k, v in current.items() if k in excluded}
+
+    ok, err = _run_set_leds("keys", [f"all={hex_color}"])
+    if not ok:
+        return False, err
+
+    if preserve:
+        restore_directives = [f"{k}={v.lstrip('#')}" for k, v in preserve.items()]
+        ok, err = _run_set_leds("keys", restore_directives)
+        if not ok:
+            return False, f"Fill succeeded but restoring F1-F12/Numpad/Nav Cluster failed: {err}"
+    return True, None
 
 
 def set_group_color(group_name, hex_color):
@@ -207,6 +240,32 @@ def _get_block_colors(block):
     return colors
 
 
+def get_all_live_colors():
+    """{our_friendly_key_name: hexcolor} across keys/gkeys/logo, for
+    the GUI to sync its preview to the device's ACTUAL current state
+    on startup. Translates device names back to our friendly ones for
+    gkeys/logo (device reports x01..x09, our canvas uses G1../LOGO1/2)
+    -- reverse of GKEY_NAMES/LOGO_NAMES. The six individually-
+    unaddressable keys (Win/Alt/AltGr/Menu/right-Ctrl/right-Shift)
+    can't be included here at all -- the device genuinely doesn't
+    report an individual color for them (confirmed empirically), so
+    the GUI has no way to know their current state short of guessing,
+    which we don't do."""
+    combined = {}
+    for block in PROFILE_BLOCKS:
+        colors = _get_block_colors(block)
+        if block == "gkeys":
+            reverse = {v: k for k, v in GKEY_NAMES.items()}
+        elif block == "logo":
+            reverse = {v: k for k, v in LOGO_NAMES.items()}
+        else:
+            reverse = {}
+        for real_name, color in colors.items():
+            friendly = reverse.get(real_name, real_name)
+            combined[friendly] = color
+    return combined
+
+
 def load_profiles():
     if PROFILES_FILE.exists():
         try:
@@ -238,11 +297,38 @@ def load_profile(name):
     """Replays a saved profile block by block. Real key names stored
     in the snapshot (block "gkeys"/"logo" already use their real x01..
     names from the live query, not our friendly G1../LOGO1 aliases) --
-    no _real_key_name() translation needed on the way back out."""
+    no _real_key_name() translation needed on the way back out.
+
+    The six individually-unaddressable keys (Win/Alt/AltGr/Menu/
+    right-Ctrl/right-Shift) were never captured in the snapshot in the
+    first place -- get-leds never reports them, see
+    _excluded_from_main_board's callers -- so without help they'd just
+    keep whatever color was on the device before the load, silently
+    diverging from the saved profile. Same fix as set_main_board_color:
+    before writing the snapshot's exact per-key colors, fill block
+    "keys" with the dominant color among the snapshot's own Main Board
+    keys (the most common color there is, by definition, what the
+    whole board was last bulk-filled to when the profile was saved).
+    That reaches the six unaddressable keys the only way they CAN be
+    reached. The per-key directives applied right after override the
+    fill for every individually addressable key back to its exact
+    saved color, so nothing else is approximated -- only the keys that
+    have no other option."""
     profiles = load_profiles()
     snapshot = profiles.get(name)
     if snapshot is None:
         return False, f"No such profile: {name}"
+
+    keys_colors = snapshot.get("keys")
+    if keys_colors:
+        excluded = _excluded_from_main_board()
+        main_board_colors = [v for k, v in keys_colors.items() if k not in excluded]
+        if main_board_colors:
+            dominant = Counter(main_board_colors).most_common(1)[0][0]
+            ok, err = _run_set_leds("keys", [f"all={dominant.lstrip('#')}"])
+            if not ok:
+                return False, f"Failed pre-filling Main Board: {err}"
+
     for block, colors in snapshot.items():
         if not colors:
             continue
