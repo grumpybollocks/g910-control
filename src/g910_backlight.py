@@ -19,7 +19,17 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 
-DEVICE = "/dev/hidraw1"
+# Stable by-id symlink, NOT a hardcoded hidrawN number -- hidraw
+# numbering is just enumeration order across EVERY hidraw device on the
+# system (mice, headsets, this keyboard's own second interface, etc.),
+# confirmed by checking `udevadm info` on every /dev/hidraw* node on
+# this machine: order is not guaranteed stable across reboots/replugs.
+# This exact symlink (serial + "-if01-hidraw" for the HID++ interface,
+# interface 1 of 2) is auto-created by udev's own built-in rules --
+# confirmed present with no custom udev rule needed, same mechanism
+# g910_app.py's MAIN_KEYBOARD_DEVICE already relies on for its event
+# node.
+DEVICE = "/dev/input/by-id/usb-Logitech_Gaming_Keyboard_G910_096239583837-if01-hidraw"
 PROFILES_FILE = Path(__file__).resolve().parent.parent / "g910_profiles.json"
 # Blocks a full lighting snapshot covers. "media" deliberately excluded
 # -- paused per the user's explicit instruction not to touch it, see
