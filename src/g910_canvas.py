@@ -177,7 +177,7 @@ ZONE_SELECTION_KEYS = dict(ZONE_KEYS)
 ZONE_SELECTION_KEYS["Main Board"] = _MAIN_BOARD_VISUAL_KEYS
 
 # Colors -- dark, clean, simple. No logos, no glossy 3D key art.
-BG_COLOR = QColor(24, 24, 27)
+BG_COLOR = QColor(0x17, 0x17, 0x1a)  # matches g910_app.py's sidebar background
 KEY_UNSET_COLOR = QColor(42, 42, 46)
 KEY_INERT_COLOR = QColor(30, 30, 33)
 KEY_BORDER_COLOR = QColor(10, 10, 12)

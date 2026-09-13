@@ -13,9 +13,62 @@ Solaar-derived layout geometry from planning) -- just enough to prove
 "set a named group of keys at once" works before investing in the real
 layout data.
 """
+import ctypes
 import subprocess
 
 DEVICE = "/dev/hidraw1"
+
+# M-key/MR indicator LEDs are NOT controlled through keyledsctl (it has
+# no subcommand for this at all -- confirmed by reading
+# keyledsctl_gkeys.c, it only calls keyleds_gkeys_enable). They go
+# through libkeyleds.so directly via ctypes -- keyleds_mkeys_set/
+# keyleds_mrkeys_set, exported functions, proven working earlier this
+# project (see G910_README.txt M-KEY/MR INDICATOR LED CONTROL section).
+_KEYLEDSCTL_APP_ID = 0x9
+_KEYLEDS_TARGET_DEFAULT = 0xff
+_MKEY_MASKS = {"M1": 0x01, "M2": 0x02, "M3": 0x04}
+
+
+def _keyleds_lib():
+    lib = ctypes.CDLL("libkeyleds.so.1")
+    lib.keyleds_open.restype = ctypes.c_void_p
+    lib.keyleds_open.argtypes = [ctypes.c_char_p, ctypes.c_uint8]
+    lib.keyleds_mkeys_set.restype = ctypes.c_bool
+    lib.keyleds_mkeys_set.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint8]
+    lib.keyleds_mrkeys_set.restype = ctypes.c_bool
+    lib.keyleds_mrkeys_set.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint8]
+    lib.keyleds_close.argtypes = [ctypes.c_void_p]
+    lib.keyleds_get_error_str.restype = ctypes.c_char_p
+    return lib
+
+
+def set_mkey_led(profile_name):
+    """Lights exactly the M-key LED matching profile_name ('M1'/'M2'/
+    'M3'), turning the others off (the mask REPLACES, doesn't add --
+    confirmed empirically earlier: setting M2 turned M1 off
+    automatically)."""
+    mask = _MKEY_MASKS.get(profile_name)
+    if mask is None:
+        return False, f"Unknown profile: {profile_name}"
+    lib = _keyleds_lib()
+    device = lib.keyleds_open(DEVICE.encode(), _KEYLEDSCTL_APP_ID)
+    if not device:
+        return False, lib.keyleds_get_error_str().decode()
+    ok = lib.keyleds_mkeys_set(device, _KEYLEDS_TARGET_DEFAULT, mask)
+    err = None if ok else lib.keyleds_get_error_str().decode()
+    lib.keyleds_close(device)
+    return bool(ok), err
+
+
+def set_mrkey_led(on):
+    lib = _keyleds_lib()
+    device = lib.keyleds_open(DEVICE.encode(), _KEYLEDSCTL_APP_ID)
+    if not device:
+        return False, lib.keyleds_get_error_str().decode()
+    ok = lib.keyleds_mrkeys_set(device, _KEYLEDS_TARGET_DEFAULT, 0x01 if on else 0x00)
+    err = None if ok else lib.keyleds_get_error_str().decode()
+    lib.keyleds_close(device)
+    return bool(ok), err
 
 # G-keys (block "gkeys") use a DIFFERENT key-naming scheme than the main
 # board (block "keys") -- confirmed empirically: "G1" is rejected, the
