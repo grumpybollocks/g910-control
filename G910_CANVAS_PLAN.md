@@ -207,3 +207,68 @@ Rough shape, not fully designed yet:
 - Does NOT need to touch feature 0x8070 (the hardware effects engine)
   at all -- this is about the existing static-color "leds" feature
   only, a snapshot of what's already controllable today.
+
+## Macro daemon (g910_macro_daemon.py) -- root cause found, verified,
+not yet run against real hardware
+
+User reported multiple things that looked like separate bugs
+("recorded macros don't record," "the M doesn't change when I press
+the physical button"). Diagnosed via a live file-watcher (objective
+timestamped diff of every write to g910_macros.json, not guesswork) --
+recording and saving were actually working correctly the whole time.
+The real, single root cause for both symptoms: **there was no
+component at all listening for physical G-key/M-key/MR presses.**
+Software-to-hardware (clicking M1 in the app lights the real LED)
+worked because it was built explicitly; hardware-to-software
+(physical presses affecting anything) never existed. Same gap as the
+sibling G510s project's split between `g510_app.py` (records) and the
+separate `g510_macro_daemon.py` service (plays back) -- G910 only had
+the first half built.
+
+Wrote `src/g910_macro_daemon.py`, structurally mirroring the G510s
+daemon (same macro file shape, same `ydotool key <code:value>...`
+replay mechanism, same "M-keys switch the live profile + write a
+status file the GUI polls" pattern) but necessarily different at the
+input layer: G510s reads plain evdev keycodes directly (its G-keys are
+real Linux keycodes via `hid_lg_g15`); G910 has none -- decodes raw
+HID++ reports on `/dev/hidraw1` instead, using the exact protocol
+already reverse-engineered and documented in `G910_README.txt`.
+
+**Verified before running anything, not assumed:**
+- `decode_report()` unit-tested against the EXACT real byte sequences
+  captured from this hardware earlier this session (not re-derived
+  from memory) -- all 10 cases (G1/G2/G8/G9 press+release, M1/M2/M3,
+  MR press+release) pass exactly.
+- Checked whether `ydotool` (the replay mechanism, copied from the
+  G510s daemon) is actually installed on this machine before trusting
+  it -- it was NOT. Real gap caught before running, not after.
+  Confirmed via `pacman -Si`/`pacman -Fl`: `extra/ydotool` (official
+  repo, not AUR), provides both the `ydotool` client and `ydotoold`
+  daemon binaries, ships its own systemd --user service unit
+  (`ydotool.service`) and udev rule for uinput permissions already --
+  nothing to hand-write there.
+
+**NOT yet done, explicitly**:
+- `ydotool` is not installed. `install-g910.sh` (on the `g910` branch)
+  does not list it as a dependency yet -- needs updating there.
+- `ydotoold` needs enabling (`systemctl --user enable --now
+  ydotool.service`) before `ydotool key` calls will actually do
+  anything.
+- The daemon itself has NEVER been run against the real keyboard.
+  Everything above is code-level verification (unit test against known
+  bytes, dependency-availability check) -- not yet a live end-to-end
+  test with real G-key presses driving real macro replay.
+- No systemd --user service file written for the daemon itself yet
+  (mirroring the G510s's `g510-macro-daemon.service`) -- currently
+  would only run manually (`python3 g910_macro_daemon.py`), doesn't
+  survive logout/reboot.
+- MR's actual behavior beyond "toggle its own LED" is undefined --
+  flagged honestly in the daemon's own docstring as a real open design
+  question, not guessed at.
+- Worth flagging plainly before this gets run live: `ydotool` can type
+  arbitrary keystrokes and the "command" macro type runs arbitrary
+  shell commands system-wide. A bug here has more real-world reach
+  than anything touched so far in this project (which was all
+  scoped to the keyboard's own LEDs). Get explicit go-ahead before
+  installing `ydotool` and running this daemon against the live
+  keyboard, not just before writing the code.

@@ -322,7 +322,11 @@ class MacroRecordDialog(QDialog):
         btn_row = QHBoxLayout()
         self.save_btn = QPushButton("Save")
         self.save_btn.clicked.connect(self.on_save)
-        self.save_btn.setEnabled(False)
+        # Deliberately NOT disabled when nothing's recorded -- a
+        # disabled button that silently does nothing when clicked is
+        # indistinguishable from a broken Save, confirmed as a real
+        # confusing UX gap while testing this. on_save() below shows a
+        # clear message instead when there's nothing to save.
         clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self.on_clear)
         cancel_btn = QPushButton("Cancel")
@@ -371,12 +375,19 @@ class MacroRecordDialog(QDialog):
         self.recorder = None
         self.record_btn.setText("Record")
         self.record_btn.setEnabled(True)
-        self.status_label.setText(f"Captured {len(sequence.split())} events. Click Save to keep it.")
-        self.save_btn.setEnabled(bool(sequence))
+        if sequence:
+            self.status_label.setText(f"Captured {len(sequence.split())} events. Click Save to keep it.")
+        else:
+            self.status_label.setText("Nothing was captured -- press a key while it says \"Recording...\", then Stop.")
 
     def on_save(self):
-        if self.recorded_sequence:
-            save_macro(self.profile, self.gkey, self.recorded_sequence, kind="keys")
+        if not self.recorded_sequence:
+            QMessageBox.warning(
+                self, "Nothing recorded",
+                "No keys were captured. Click Record, press the key combo, then Stop before Save.",
+            )
+            return
+        save_macro(self.profile, self.gkey, self.recorded_sequence, kind="keys")
         self.accept()
 
     def on_save_command(self):
@@ -441,6 +452,16 @@ class GKeysTab(QWidget):
         layout.addStretch()
         self.setLayout(layout)
 
+        # Physical M1/M2/M3 presses go through g910_macro_daemon.py
+        # (not this app -- confirmed there's no listener here at all,
+        # that daemon is what closes the gap), which writes the active
+        # profile to a status file. Poll it so the GUI follows physical
+        # presses too, not just its own buttons -- same pattern as the
+        # G510s app's poll_active_profile.
+        self.profile_poll_timer = QTimer(self)
+        self.profile_poll_timer.timeout.connect(self.poll_active_profile)
+        self.profile_poll_timer.start(500)
+
     def select_profile(self, name):
         self.current_profile = name
         for n, btn in self.profile_buttons.items():
@@ -448,6 +469,17 @@ class GKeysTab(QWidget):
         ok, err = bl.set_mkey_led(name)
         if not ok:
             print(f"FAILED to light {name} LED: {err}")
+
+    def poll_active_profile(self):
+        import os
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+        profile_file = Path(runtime, "g910_macro_profile")
+        try:
+            live = profile_file.read_text().strip()
+        except Exception:
+            return
+        if live in self.profile_buttons and live != self.current_profile:
+            self.select_profile(live)
 
     def open_key_dialog(self, gkey):
         dlg = MacroRecordDialog(self.current_profile, gkey, self)
