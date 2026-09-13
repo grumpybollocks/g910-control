@@ -299,7 +299,43 @@ correctly, no flooding, tested twice). M1/M2/M3 profile switching
 confirmed reliable. Both confirmed directly by the user on the real
 keyboard, not assumed from the code fix alone.
 
-Still not done: no systemd --user service for the daemon (manual run
-only, doesn't survive logout/reboot), MR's behavior beyond its own LED
-toggle still undefined, and the Profiles tab (see above) is still only
-planned, not built.
+Still not done: MR's behavior beyond its own LED toggle still
+undefined (deliberate scope, not a bug -- see below), and the
+Profiles tab (see above) is still only planned, not built.
+
+### Daemon: systemd --user service installed + rigorous audit pass (2026-09-14)
+
+Merged `g910` branch's newer commits into `g910-canvas` first (both
+had diverged -- `install-g910.sh`/`G910_README.md` only existed on
+`g910`, the daemon only existed here -- clean merge, no conflicts).
+
+Added `services/g910-macro-daemon.service` (mirrors the sibling
+G510s's `g510-macro-daemon.service` exactly: `Requires=ydotool.service`,
+`Restart=on-failure`, `WantedBy=default.target`), installed via
+`~/.config/systemd/user/`, `daemon-reload`, `enable --now`. Confirmed
+running clean (no errors in `journalctl`), and confirmed G5 replay
+works identically through the systemd-managed instance as it did
+running manually. `install-g910.sh` updated to do this automatically
+for a fresh install, not just done by hand.
+
+Per the user's explicit "make this bulletproof, verify yourself"
+request, re-read the whole daemon file looking for silent-failure
+paths rather than assuming the working test above was sufficient.
+Found real gaps: `subprocess.run()`'s return code for the startup
+`keyledsctl gkeys on` call was never checked; `bl.set_mkey_led()` and
+`bl.set_mrkey_led()`'s `(ok, err)` return values were discarded at
+every call site (startup and in the main loop); `replay()`'s
+`subprocess.run()` result was also unchecked. All fixed to log a
+clear `WARNING:`/`FAILED:` message to stderr (captured automatically
+by `journalctl` since this runs as a systemd unit) instead of failing
+silently.
+
+Also directly confirmed MR had never been tested at all this session,
+despite the whole G-key/M-key flow being tested repeatedly -- watched
+the daemon's live log while the user pressed it for real. Confirmed
+working exactly to its current, deliberately limited scope: the
+physical LED toggles correctly (`set_mrkey_led` succeeds, no
+warning logged). It does NOT arm/disarm any recording behavior --
+that was never built, and the daemon's own docstring already says so
+explicitly ("not yet designed"). User's "never recorded macro"
+observation matches this exactly -- confirmed expected, not a bug.
