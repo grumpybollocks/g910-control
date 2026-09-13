@@ -17,7 +17,7 @@ specific layout for those.
 import sys
 from collections import Counter
 from dataclasses import dataclass
-from PyQt5.QtCore import Qt, QRectF, QPointF
+from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont
 from PyQt5.QtWidgets import QWidget, QColorDialog, QApplication
 
@@ -49,24 +49,38 @@ class Cell:
     individually_colorable: bool = True
 
 
-# --- M-keys + MR (row -2, ABOVE G6-G9's row -- was colliding with
-# them at row -1 before, M3/G6 landed on the exact same cell) ---
+# --- M-keys + MR: smaller than a full key, tucked into the gap
+# between Logo and G6-G9 on G6-G9's own row (-1). row=-0.825/
+# height=0.65 centers them vertically within that row's band (-1 to
+# 0). MKEY_FONT_PT (see below, used in paintEvent) is smaller than the
+# normal 9pt label font -- these boxes are still narrower than a full
+# key, a 2-char label needs a smaller font to actually fit.
+# key_name here is NOT a real keyledsctl name (block=None -- no LED
+# color mechanism reaches these at all, confirmed empirically) -- it's
+# just a stable identifier so the canvas can tell these four cells
+# apart for click handling and active-profile highlighting.
 MKEY_CELLS = [
-    Cell(None, "M1", -2, 0, block=None),
-    Cell(None, "M2", -2, 1, block=None),
-    Cell(None, "M3", -2, 2, block=None),
-    Cell(None, "MR", -2, 3, block=None),
+    Cell("_M1", "M1", -0.825, 0.0, width=0.55, height=0.65, block=None),
+    Cell("_M2", "M2", -0.825, 0.62, width=0.55, height=0.65, block=None),
+    Cell("_M3", "M3", -0.825, 1.24, width=0.55, height=0.65, block=None),
+    Cell("_MR", "MR", -0.825, 1.86, width=0.55, height=0.65, block=None),
 ]
+MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
+MKEY_FONT_PT = 6
 
 # --- Logo, between the M-keys and the G1 column (matches reference).
-# height=1.0, not 2.2 -- that was overlapping G1's cell below it.
+# height 1.15/width 1.05, not 1.0/0.9 -- bumped ~15% bigger by request
+# (design choice, not a hardware fact). Not 2.2 tall -- that was
+# overlapping G1's cell below it.
 LOGO_CELLS = [
-    Cell("LOGO1", "G", -1, -1.3, width=0.9, height=1.0, block="logo"),
+    Cell("LOGO1", "G", -1, -1.3, width=1.05, height=1.15, block="logo"),
 ]
 
-# --- G-keys: G1-G5 left column, G6-G9 top row above F1-F4 ---
+# --- G-keys: G1-G5 left column, G6-G9 top row (was directly above
+# F1-F4, pushed right +0.6 by request to clear space from the M-keys
+# cluster to their left -- no longer perfectly above F1-F4). ---
 GKEY_LEFT_CELLS = [Cell(f"G{i}", f"G{i}", i, -1.3, width=0.9) for i in range(1, 6)]
-GKEY_TOP_CELLS = [Cell(f"G{i}", f"G{i}", -1, i - 4, block="gkeys") for i in range(6, 10)]
+GKEY_TOP_CELLS = [Cell(f"G{i}", f"G{i}", -1, i - 4 + 0.6, block="gkeys") for i in range(6, 10)]
 for c in GKEY_LEFT_CELLS:
     c.block = "gkeys"
 
@@ -189,6 +203,16 @@ ZONE_KEYS = {
 ZONE_SELECTION_KEYS = dict(ZONE_KEYS)
 ZONE_SELECTION_KEYS["Main Board"] = _MAIN_BOARD_VISUAL_KEYS
 
+# Reverse of ZONE_SELECTION_KEYS: which zone a given key belongs to,
+# so clicking a key on the canvas can tell the sidebar to select the
+# matching zone in its list. Built from ZONE_SELECTION_KEYS (not
+# ZONE_KEYS) so the six individually-unaddressable Main Board keys
+# (Win/Alt/AltGr/etc) still resolve to "Main Board" even though they
+# can't be clicked to open a color picker themselves.
+KEY_TO_ZONE = {
+    key: zone for zone, keys in ZONE_SELECTION_KEYS.items() for key in keys
+}
+
 # Colors -- dark, clean, simple. No logos, no glossy 3D key art.
 BG_COLOR = QColor(0x17, 0x17, 0x1a)  # matches g910_app.py's sidebar background
 KEY_UNSET_COLOR = QColor(42, 42, 46)
@@ -196,9 +220,14 @@ KEY_INERT_COLOR = QColor(30, 30, 33)
 KEY_BORDER_COLOR = QColor(10, 10, 12)
 SELECTION_BORDER_COLOR = QColor(70, 140, 230)
 LABEL_INERT_COLOR = QColor(90, 90, 95)
+ACTIVE_MKEY_COLOR = QColor(58, 108, 196)   # matches the accent blue used elsewhere
+MR_ACTIVE_COLOR = QColor(196, 70, 58)      # distinct warm color -- MR is a different kind of state (armed toggle), not a profile
 
 
 class KeyboardCanvas(QWidget):
+    zone_clicked = pyqtSignal(str)  # emitted with a ZONE_KEYS name when a colorable key is clicked -- lets the sidebar follow along
+    mkey_clicked = pyqtSignal(str)  # emitted with "M1"/"M2"/"M3"/"MR" when one of those cells is clicked
+
     def __init__(self):
         super().__init__()
         self._colors = {}  # key_name -> QColor, unset keys use KEY_UNSET_COLOR
@@ -207,9 +236,19 @@ class KeyboardCanvas(QWidget):
         self._drag_rect = None
         self._ctrl_down = False
         self._previous_selection = set()
+        self._active_mkey = "M1"  # matches GKeysTab's own default -- kept in sync via set_active_mkey()
+        self._mr_active = False
         self.setMouseTracking(True)
         self._compute_size()
         self.sync_from_device()
+
+    def set_active_mkey(self, name):
+        self._active_mkey = name
+        self.update()
+
+    def set_mr_active(self, on):
+        self._mr_active = on
+        self.update()
 
     def sync_from_device(self):
         """Query the device's ACTUAL current colors and populate the
@@ -278,6 +317,19 @@ class KeyboardCanvas(QWidget):
         h = cell.height * CELL_PX + max(0.0, cell.height - 1.0) * GUTTER_PX
         return QRectF(x, y, w, h)
 
+    def main_board_pixel_span(self):
+        """(left_x, right_x) in this widget's own pixel coordinates of
+        the 'keyboard proper' -- M-keys/Logo/G-keys/main board -- NOT
+        the whole canvas. The canvas is wider than that because Nav
+        Cluster + Numpad extend further right with a visual gap; a
+        strip centered under the FULL canvas would look off-center
+        under the actual keyboard block. Used by g910_app.py to center
+        the G-Keys macro strip under the keyboard, not the numpad."""
+        cells = MKEY_CELLS + LOGO_CELLS + GKEY_LEFT_CELLS + GKEY_TOP_CELLS + MAIN_CELLS
+        lefts = [self._cell_rect(c).left() for c in cells]
+        rights = [self._cell_rect(c).right() for c in cells]
+        return min(lefts), max(rights)
+
     def _cell_at(self, point):
         for cell in ALL_CELLS:
             if self._cell_rect(cell).contains(point):
@@ -296,6 +348,8 @@ class KeyboardCanvas(QWidget):
         painter.fillRect(self.rect(), BG_COLOR)
         font = QFont()
         font.setPointSize(9)
+        mkey_font = QFont()
+        mkey_font.setPointSize(MKEY_FONT_PT)
         painter.setFont(font)
 
         for cell in ALL_CELLS:
@@ -303,7 +357,12 @@ class KeyboardCanvas(QWidget):
             path = QPainterPath()
             path.addRoundedRect(rect, 4, 4)
 
-            if cell.block is None:
+            is_mkey = cell.key_name in MKEY_NAMES
+            if cell.key_name == f"_{self._active_mkey}":
+                fill = ACTIVE_MKEY_COLOR
+            elif cell.key_name == "_MR" and self._mr_active:
+                fill = MR_ACTIVE_COLOR
+            elif cell.block is None:
                 fill = KEY_INERT_COLOR
             else:
                 fill = self._colors.get(cell.key_name, KEY_UNSET_COLOR)
@@ -317,7 +376,9 @@ class KeyboardCanvas(QWidget):
             painter.setPen(QPen(border, pen_width))
             painter.drawPath(path)
 
-            painter.setPen(self._label_color(fill if cell.block is not None else None))
+            label_fill = fill if (cell.block is not None or is_mkey) else None
+            painter.setPen(self._label_color(label_fill))
+            painter.setFont(mkey_font if is_mkey else font)
             painter.drawText(rect, Qt.AlignCenter, cell.label)
 
         if self._drag_rect is not None:
@@ -341,6 +402,17 @@ class KeyboardCanvas(QWidget):
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
             return
+
+        cell = self._cell_at(QPointF(event.pos()))
+        if cell is not None and cell.key_name in MKEY_NAMES:
+            # M1/M2/M3/MR aren't part of the drag-select/color-picker
+            # flow at all (block=None, no LED color mechanism) -- just
+            # forward the click and stop, same as pressing the real key.
+            self.mkey_clicked.emit(cell.label)
+            return
+        if cell is not None and cell.key_name in KEY_TO_ZONE:
+            self.zone_clicked.emit(KEY_TO_ZONE[cell.key_name])
+
         self._ctrl_down = bool(event.modifiers() & Qt.ControlModifier)
         if self._ctrl_down:
             self._previous_selection = set(self._selection)
