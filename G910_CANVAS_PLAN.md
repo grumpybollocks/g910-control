@@ -108,27 +108,68 @@ only. Real key names, block naming (`x01`-`x09` for gkeys/logo),
   to a pixel `QRectF` via a fixed cell-size + gutter scale (same
   pattern as Solaar's `canvas.py`), test clicks with
   `QRectF.contains(point)`.
-- **Backend integration**: unchanged. Click handling still calls the
-  exact same `g910_backlight.set_key_color`/`set_group_color`
-  functions already proven working.
+- **Backend integration**: unchanged for single clicks — still calls
+  the exact same `g910_backlight.set_key_color`/`set_group_color`
+  functions already proven working. For DRAG-PAINT specifically, see
+  the buffer/commit finding below: single-click keeps calling the
+  existing per-key function (already efficient enough for one key at a
+  time), but drag-paint gets its own batched path.
 - **Color Mode sidebar**: unchanged, sits next to the new canvas
   widget exactly like it sits next to the button grid today.
 
-## Open questions — need your answer before any code gets written
+## Real protocol finding that changes the drag-paint design
 
-1. **Logo key placement**: where should it sit on the redrawn
-   keyboard? (Your screenshot shows it between the M-keys row and the
-   G1 column, roughly where the physical Logitech "G" logo actually
-   is on the real board.)
-2. **Interaction scope for this pass**: single-click only (exactly
-   matches current behavior — click a key, pick a color, done — just
-   on more accurate geometry), or also build drag/multi-select now
-   (bigger lift, matches Solaar/OpenRGB's full capability sooner but
-   is more to get right in one pass)?
-3. **Live color display**: should the canvas query the device's real
-   current colors on startup (extra `get-leds` calls, shows true state
-   but adds a bit of latency), or just track colors locally in the app
-   as you apply them (simpler, but could show stale info if something
-   else changed a color outside the app)?
+Read `libkeyleds/src/feature_leds.c` (the real compiled source, same
+tarball used in the earlier audit) directly rather than assume how
+color-setting works. The HID++ `LEDS` feature is a **buffered
+write + explicit commit** model:
+`keyleds_set_leds()`'s own doc comment: *"Updates an internal buffer
+on the device. Actual lights are not updated until
+keyleds_commit_leds() is called."* Every test this session looked
+instant because `keyledsctl set-leds` (`keyledsctl_set_leds.c` line
+189) calls `keyleds_commit_leds()` exactly ONCE, after processing every
+directive given to that single process invocation.
+
+**Consequence for drag-paint**: if the canvas shelled out to
+`keyledsctl` once per key while the mouse drags across many keys, each
+call would pay the full cost of opening the HID++ device and
+re-discovering its features every single time — slow, and wasteful
+given the protocol is explicitly designed for batching. The correct
+design: accumulate the keys touched during a drag stroke in memory,
+and send them as ONE batched `set-leds` call on mouse release (or
+periodically during a very long drag, not per-key). `g910_backlight`'s
+`_run_set_leds` already accepts a list of directives and sends them in
+one call — this is a natural extension of the existing plumbing, not a
+rewrite. Single clicks stay exactly as they are now (one key, one
+call) since there's no batching benefit at that scale.
+
+## Decisions (resolved)
+
+1. **Logo key placement**: between the M-keys row and the G1 column,
+   matching the reference screenshot / real board.
+2. **Interaction scope**: drag/multi-select IS in scope for this pass,
+   not deferred. Adapt OpenRGB's actual proven selection-rect/Ctrl-XOR
+   code (`qt/DeviceView.cpp`) rather than design one from scratch —
+   efficient reuse, not a shortcut, since it's a real working reference
+   in the same framework.
+3. **Live color display / reboot persistence**: the user's own prior
+   experience is that Solaar's on-device settings survived reboots for
+   them before, and has decided to proceed on that basis rather than
+   spend more time verifying it for this specific keyboard/feature
+   right now. Worth being precise about what that evidence actually
+   covers: Solaar's own per-key lighting targets a DIFFERENT HID++
+   feature (`PER_KEY_LIGHTING_V2`, 0x8081) than what this G910 actually
+   has (`leds`/`led-effects`, confirmed back in the original research
+   pass) — so "Solaar persisted across reboot" was very likely observed
+   on different hardware or a different feature than the one this
+   project uses. Not re-litigating this now per the user's explicit
+   instruction to move on, but noting the distinction honestly rather
+   than treating it as directly-proven for our exact case. If colors
+   turn out NOT to survive a real reboot once this is testable in
+   practice, the fix is a login-time reapply script + systemd service,
+   same shape as (but not copied from, since G510s's mechanism was for
+   a different, simpler LED-class-sysfs backlight, not this HID++
+   per-key system) — deferred, not designed now, since it isn't blocking
+   this rendering-layer rearchitecture either way.
 
 Nothing gets implemented until these are answered.
