@@ -23,6 +23,8 @@ import json
 import os
 import select
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import g910_backlight as bl
@@ -30,6 +32,16 @@ import g910_backlight as bl
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 MACROS_FILE = PROJECT_DIR / "g910_macros.json"
 DEVICE_PATH = "/dev/hidraw1"
+
+# Real bug found and fixed via a live diagnostic capture: a single real
+# G5 press was followed by clean press/release pairs repeating every
+# 100-400ms for 2.5+ seconds straight (confirmed via raw hidraw
+# timestamps, not assumed) -- the keyboard firmware's own key-repeat
+# behavior, same thing that makes a held letter key type "aaaaa". The
+# daemon had zero protection against this and replayed the macro on
+# every single repeat. COOLDOWN_SECONDS ignores a new press of the
+# SAME key within this window of the last one it acted on.
+COOLDOWN_SECONDS = 0.35
 
 
 def load_macros():
@@ -47,6 +59,10 @@ def write_active_profile(name):
 
 
 def replay(entry):
+    """Runs in its own thread (see main()) so a slow macro/command can
+    never block the read loop and delay/miss the next real HID++
+    report -- confirmed this matters: subprocess.run() here used to
+    run inline on the same thread that reads M-key presses too."""
     if isinstance(entry, str):  # legacy/bare-string format, pre-command-support
         subprocess.run(["ydotool", "key"] + entry.split())
     elif entry.get("type") == "command":
@@ -101,6 +117,8 @@ def main():
     write_active_profile(active_profile)
     bl.set_mkey_led(active_profile)
 
+    last_trigger = {}  # key_name -> time.monotonic() of last accepted press
+
     fd = os.open(DEVICE_PATH, os.O_RDONLY)
     try:
         while True:
@@ -113,6 +131,15 @@ def main():
             if not is_press:
                 continue  # only act on press, matching the G510s daemon's key-down-only filter
 
+            # Firmware key-repeat cooldown -- confirmed necessary via a
+            # live capture (see COOLDOWN_SECONDS comment above), applies
+            # to every key kind, not just G-keys, since M-keys/MR could
+            # repeat-fire the same way if held.
+            now = time.monotonic()
+            if now - last_trigger.get(name, 0) < COOLDOWN_SECONDS:
+                continue
+            last_trigger[name] = now
+
             if kind == "mkey":
                 active_profile = name
                 write_active_profile(active_profile)
@@ -124,7 +151,10 @@ def main():
                 macros = load_macros()  # reload each time -- app may have just saved a new one
                 entry = macros.get(active_profile, {}).get(name)
                 if entry:
-                    replay(entry)
+                    # Own thread: a slow command/ydotool call must
+                    # never block the read loop, or the next M-key
+                    # press (or another G-key) could be delayed/missed.
+                    threading.Thread(target=replay, args=(entry,), daemon=True).start()
     finally:
         os.close(fd)
 
