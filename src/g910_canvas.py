@@ -15,6 +15,7 @@ positions are ours -- no external source covers this keyboard's
 specific layout for those.
 """
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from PyQt5.QtCore import Qt, QRectF, QPointF
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont
@@ -35,7 +36,17 @@ class Cell:
     col: float
     width: float = 1.0
     height: float = 1.0
-    block: str = "keys"  # "keys" / "gkeys" / "logo" / None (inert)
+    block: str = "keys"  # "keys" / "gkeys" / "logo" / None (M-keys only, no
+                          # bulk mechanism reaches them at all)
+    # False for Win/Alt/AltGr/Menu/right-Ctrl/right-Shift specifically:
+    # confirmed via direct live testing they have NO individual per-key
+    # LED (rejected by name, never appear in get-leds's per-key listing)
+    # but DO respond to the whole-block "all=" fill (keyleds_set_led_block,
+    # a different HID++ function than per-key set_leds -- confirmed via
+    # keyledsctl_set_leds.c's real source). So they're colorable via
+    # Main Board's bulk apply but can't be clicked individually on the
+    # canvas -- see set_main_board_color()'s docstring for the full fix.
+    individually_colorable: bool = True
 
 
 # --- M-keys + MR (row -2, ABOVE G6-G9's row -- was colliding with
@@ -92,14 +103,16 @@ MAIN_CELLS = [
     Cell("X", "X", 4, 3.25), Cell("C", "C", 4, 4.25), Cell("V", "V", 4, 5.25),
     Cell("B", "B", 4, 6.25), Cell("N", "N", 4, 7.25), Cell("M", "M", 4, 8.25),
     Cell("COMMA", ",", 4, 9.25), Cell("DOT", ".", 4, 10.25), Cell("SLASH", "/", 4, 11.25),
-    Cell("_RSHIFT", "Shift", 4, 12.25, width=2.75, block=None),
+    Cell("_RSHIFT", "Shift", 4, 12.25, width=2.75, block="keys", individually_colorable=False),
     # bottom row
-    Cell("LCTRL", "Ctrl", 5, 0, width=1.25), Cell("_LWIN", "Win", 5, 1.25, width=1.25, block=None),
-    Cell("_LALT", "Alt", 5, 2.5, width=1.25, block=None), Cell("SPACE", "Space", 5, 3.75, width=6.25),
-    Cell("_ALTGR", "AltGr", 5, 10.0, width=1.25, block=None),
-    Cell("_RWIN", "Win", 5, 11.25, width=1.25, block=None),
-    Cell("_MENU", "Menu", 5, 12.5, width=1.25, block=None),
-    Cell("_RCTRL", "Ctrl", 5, 13.75, width=1.25, block=None),
+    Cell("LCTRL", "Ctrl", 5, 0, width=1.25),
+    Cell("_LWIN", "Win", 5, 1.25, width=1.25, block="keys", individually_colorable=False),
+    Cell("_LALT", "Alt", 5, 2.5, width=1.25, block="keys", individually_colorable=False),
+    Cell("SPACE", "Space", 5, 3.75, width=6.25),
+    Cell("_ALTGR", "AltGr", 5, 10.0, width=1.25, block="keys", individually_colorable=False),
+    Cell("_RWIN", "Win", 5, 11.25, width=1.25, block="keys", individually_colorable=False),
+    Cell("_MENU", "Menu", 5, 12.5, width=1.25, block="keys", individually_colorable=False),
+    Cell("_RCTRL", "Ctrl", 5, 13.75, width=1.25, block="keys", individually_colorable=False),
 ]
 
 NAV_COL0 = 15.5  # one gap column right of the main board (main board ends ~col15)
@@ -196,6 +209,40 @@ class KeyboardCanvas(QWidget):
         self._previous_selection = set()
         self.setMouseTracking(True)
         self._compute_size()
+        self.sync_from_device()
+
+    def sync_from_device(self):
+        """Query the device's ACTUAL current colors and populate the
+        preview from them, so the app reflects real state on open
+        instead of starting blank.
+
+        The six individually-unaddressable keys (Win/Alt/AltGr/Menu/
+        right-Ctrl/right-Shift) never appear in the device's per-key
+        report -- confirmed empirically, see the Cell dataclass comment
+        -- so we can't read their real color directly. But we know how
+        they're actually colored in practice: Main Board's "all=" bulk
+        fill (keyleds_set_led_block) reaches them too, and nothing else
+        does. So on sync we approximate their color as the most common
+        color among the rest of the (individually-addressable) Main
+        Board keys -- exactly right after a solid fill, which is the
+        only way these keys get colored at all today."""
+        live = bl.get_all_live_colors()
+        for name, hexcolor in live.items():
+            self._colors[name] = QColor(hexcolor)
+
+        main_board_colors = [
+            self._colors[c.key_name] for c in ALL_CELLS
+            if c.block == "keys" and c.individually_colorable
+            and c.key_name in self._colors
+        ]
+        if main_board_colors:
+            counts = Counter(c.name() for c in main_board_colors)
+            dominant = QColor(counts.most_common(1)[0][0])
+            for c in ALL_CELLS:
+                if c.block == "keys" and not c.individually_colorable:
+                    self._colors[c.key_name] = dominant
+
+        self.update()
 
     def select_keys(self, key_names):
         """Replace the current selection with an explicit set of real
@@ -282,7 +329,7 @@ class KeyboardCanvas(QWidget):
         sel = self._drag_rect.normalized()
         new_sel = set()
         for cell in ALL_CELLS:
-            if cell.block is None:
+            if cell.block is None or not cell.individually_colorable:
                 continue
             if sel.intersects(self._cell_rect(cell)):
                 new_sel.add(cell.key_name)

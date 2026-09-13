@@ -86,6 +86,18 @@ QPushButton:checked {
     border-color: #5a8ce0;
     color: white;
 }
+QPushButton#Primary {
+    background-color: #3a6cc4;
+    border-color: #5a8ce0;
+    color: white;
+    text-align: center;
+    font-weight: 600;
+    padding: 9px 10px;
+}
+QPushButton#Primary:hover {
+    background-color: #4a7cd4;
+    border-color: #6a9cf0;
+}
 QLabel#Title {
     font-size: 15px;
     font-weight: 600;
@@ -171,6 +183,7 @@ class ColorModeSidebar(QWidget):
 
         layout.addSpacing(14)
         apply_btn = QPushButton("Pick Color && Apply")
+        apply_btn.setObjectName("Primary")
         apply_btn.clicked.connect(self.on_apply)
         layout.addWidget(apply_btn)
 
@@ -198,12 +211,19 @@ class ColorModeSidebar(QWidget):
             return
         scaled = scale_color(color, self.brightness_pct)
         hexcolor = scaled.name().lstrip("#")
-        keys = ZONE_KEYS[self.current_target]
+        # ZONE_SELECTION_KEYS, not ZONE_KEYS: for Main Board this also
+        # includes Win/Alt/AltGr/Menu/right-Ctrl/right-Shift, which
+        # DO get reached by the real apply (set_main_board_color's
+        # whole-block fill, confirmed via live testing) even though
+        # they can't be addressed individually -- using ZONE_KEYS here
+        # would leave the canvas preview wrong (still grey) for keys
+        # that actually did change color on the real hardware.
+        preview_keys = ZONE_SELECTION_KEYS[self.current_target]
 
         ok, err = self._apply_zone(self.current_target, hexcolor)
         if ok:
             self.status_label.setText(f"{self.current_target} set to #{hexcolor} ({self.brightness_pct}%)")
-            self.canvas.set_colors(keys, scaled)
+            self.canvas.set_colors(preview_keys, scaled)
         else:
             self.status_label.setText(f"FAILED: {err}")
 
@@ -231,10 +251,10 @@ class BacklightTab(QWidget):
         outer.setSpacing(14)
         self.setLayout(outer)
 
-        canvas = KeyboardCanvas()
-        sidebar = ColorModeSidebar(canvas)
+        self.canvas = KeyboardCanvas()
+        sidebar = ColorModeSidebar(self.canvas)
         outer.addWidget(sidebar)
-        outer.addWidget(canvas)
+        outer.addWidget(self.canvas)
 
 
 # --- G-Keys tab (ported from g510_app.py's proven pattern) -------------
@@ -495,9 +515,12 @@ class ProfilesTab(QWidget):
     combination. Backend already verified directly against the real
     device before this UI was wired to it -- save/load/delete/list all
     confirmed working (real snapshot captured, real color match
-    confirmed after replay)."""
-    def __init__(self):
+    confirmed after replay). Takes the Backlight tab's canvas so a
+    successful Load can refresh the preview to match -- otherwise the
+    canvas would keep showing whatever was there before the load."""
+    def __init__(self, canvas):
         super().__init__()
+        self.canvas = canvas
         layout = QVBoxLayout()
         layout.setContentsMargins(14, 14, 14, 14)
 
@@ -508,6 +531,7 @@ class ProfilesTab(QWidget):
 
         layout.addSpacing(10)
         save_btn = QPushButton("Save Current as Profile...")
+        save_btn.setObjectName("Primary")
         save_btn.clicked.connect(self.on_save)
         layout.addWidget(save_btn)
 
@@ -572,6 +596,7 @@ class ProfilesTab(QWidget):
         success, err = bl.load_profile(name)
         if success:
             self.status_label.setText(f'Loaded "{name}".')
+            self.canvas.sync_from_device()
         else:
             self.status_label.setText(f"FAILED: {err}")
 
@@ -595,9 +620,10 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLESHEET)
 
         tabs = QTabWidget()
-        tabs.addTab(BacklightTab(), "Backlight")
+        backlight_tab = BacklightTab()
+        tabs.addTab(backlight_tab, "Backlight")
         tabs.addTab(GKeysTab(), "G-Keys")
-        tabs.addTab(ProfilesTab(), "Profiles")
+        tabs.addTab(ProfilesTab(backlight_tab.canvas), "Profiles")
         self.setCentralWidget(tabs)
 
 

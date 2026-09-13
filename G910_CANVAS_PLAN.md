@@ -86,7 +86,10 @@ only. Real key names, block naming (`x01`-`x09` for gkeys/logo),
   REAL `keyledsctl` name (`"ESC"`, `"BACKSPACE"`, `"G1"`, ...), not a
   display label; `block` is `"keys"`/`"gkeys"`/`"logo"`/`None`
   (inert, matching the current skeleton's treatment of RCTRL/RALT/etc
-  which have no individual LED).
+  which have no individual LED). **Superseded 2026-09-14, see "Main
+  Board block-fill correction" below** -- these keys DO respond to
+  block-wide fills, just not individual addressing; they now use
+  `block="keys", individually_colorable=False` instead of `block=None`.
 - **Data source**: port Solaar's `_keyboard_base.py` row/col/gap
   values by hand into our own file (copy the numeric constants, credit
   the source and license in a comment — we do NOT import Solaar's
@@ -197,13 +200,12 @@ Rough shape, not fully designed yet:
 - Loading a profile replays it via `_run_set_leds`, block by block --
   already-proven plumbing, no new hardware-facing code needed, this is
   purely a save/list/load UI wrapping existing functions.
-- Open question, not yet decided: should Main Board's excluded inert
-  keys (Win/Alt/AltGr/Menu/right-Ctrl/right-Shift -- see the M-KEY/
-  inert-key work earlier) matter here at all? They can't be saved/
-  restored either way since they were never colorable, so this is
-  purely about whether the UI should show them as part of a "full
-  snapshot" cosmetically. Low priority, decide when actually building
-  this.
+- **Resolved 2026-09-14, see "Saved profiles never captured the six
+  inert keys" below**: they ARE colorable (via block-fill, not
+  individual addressing), so this did end up mattering. `load_profile`
+  now infers their color from the snapshot's own Main Board dominant
+  color and fills block "keys" with it before replaying exact per-key
+  values, so a loaded profile matches on all six keys too.
 - Does NOT need to touch feature 0x8070 (the hardware effects engine)
   at all -- this is about the existing static-color "leds" feature
   only, a snapshot of what's already controllable today.
@@ -339,3 +341,112 @@ warning logged). It does NOT arm/disarm any recording behavior --
 that was never built, and the daemon's own docstring already says so
 explicitly ("not yet designed"). User's "never recorded macro"
 observation matches this exactly -- confirmed expected, not a bug.
+
+### Main Board block-fill correction + GUI catch-up (2026-09-14)
+
+Earlier documentation (this file, `G910_README.md`) repeatedly and
+confidently asserted that Win/Alt/AltGr/Menu/right-Ctrl/right-Shift
+have NO way to be colored at all. That was wrong, and the user caught
+it by testing directly: these six keys were visibly purple in a
+screenshot, contradicting the claim. Verified live rather than
+defending the prior assertion: `keyledsctl set-leds -b keys all=00ff00`
+turned them green along with the rest of the board (user-confirmed).
+Real mechanism, read from `keyledsctl_set_leds.c`'s actual source:
+`all=` uses `keyleds_set_led_block` (a whole-block fill), a different
+HID++ call than the per-key `keyleds_set_leds` used for named keys.
+So the accurate statement is: these six keys have no INDIVIDUAL LED
+(still true, confirmed many times over -- they never appear in
+`get-leds`'s per-key listing, and addressing them by name is
+rejected), but they DO respond to the block-wide fill. This is the
+only mechanism that reaches them at all.
+
+Propagated the correction through the whole stack:
+
+- `g910_backlight.py`: `set_main_board_color()` rewritten to
+  snapshot-fill-restore -- read F1-F12/Numpad/Nav Cluster's current
+  colors first, do the `all=` fill (which now also reaches the six
+  keys), then restore just those three dedicated-button groups back
+  to what they were. Tested via CLI (F1 unchanged, A changed) and
+  confirmed live by the user ("yes they turned orange, main board
+  keeps them intact").
+- `g910_canvas.py`: `Cell` gained `individually_colorable: bool`
+  (True by default, False for the six keys) so the canvas can
+  distinguish "can't be clicked individually" from "can't be colored
+  at all" -- they kept `block="keys"` instead of `block=None`, and
+  drag-selection now skips them via `individually_colorable` instead
+  of the old `block is None` check.
+- `g910_app.py`: `ColorModeSidebar.on_apply()`'s canvas preview call
+  switched from `ZONE_KEYS` (strictly individually-addressable) to
+  `ZONE_SELECTION_KEYS` (includes the six keys) so a Main Board apply
+  visually updates them in the GUI too, matching the real keyboard.
+
+### Startup live-sync + profile-load sync + inert-key preview (2026-09-14)
+
+User request: "can you make the app always when opened to reflect the
+current key colouring setup?" Added `get_all_live_colors()` to
+`g910_backlight.py` -- queries every block in `PROFILE_BLOCKS`,
+translates device names back to friendly canvas names (reverse of
+`GKEY_NAMES`/`LOGO_NAMES`) -- and `KeyboardCanvas.sync_from_device()`
+in `g910_canvas.py`, called once from `__init__`. Verified directly
+(not just "should work"): ran `get_all_live_colors()` standalone
+against the real device, got back 115 real key colors matching what
+was actually set.
+
+First visual test (screenshot) immediately surfaced the obvious gap:
+the six individually-unaddressable keys showed as inert grey in the
+preview even though they were physically orange -- expected, since
+`get_all_live_colors()` can only report what the device reports, and
+the device never reports these six at all (same root cause as the
+block-fill discovery above). Fixed with an approximation, not a
+guess about hardware: since the ONLY way these keys get colored is
+the Main Board's `all=` fill, their live color on sync is inferred as
+the most common (mode) color among the rest of the individually-
+addressable Main Board keys -- exactly correct after any solid fill,
+which is the only way they're colored today. Implemented as a
+`Counter` over `ALL_CELLS` filtered to `block == "keys" and
+individually_colorable`, applied to the ones that aren't. Confirmed
+correct live by the user.
+
+Two more real gaps found and fixed in the same session, both caught
+by the user actually using the feature rather than assumed fixed
+after the first confirmation:
+
+1. **Profile Load didn't refresh the canvas.** `sync_from_device()`
+   only ran once, at `KeyboardCanvas.__init__` -- loading a profile
+   changed the device but nothing told the canvas to re-query. Fixed
+   by giving `ProfilesTab` a reference to the Backlight tab's canvas
+   (`BacklightTab` now stores `self.canvas`; `MainWindow` passes
+   `backlight_tab.canvas` into `ProfilesTab(canvas)`), and calling
+   `self.canvas.sync_from_device()` after a successful `on_load`.
+   Confirmed live: canvas now updates immediately after clicking Load.
+
+2. **Saved profiles never captured the six inert keys' color at all.**
+   `save_profile()` snapshots via `_get_block_colors()`, which -- same
+   root cause again -- never sees these six keys, so they were simply
+   absent from every saved profile. On load, they'd silently keep
+   whatever color was already on the device instead of matching the
+   loaded profile. Fixed in `load_profile()`: before replaying the
+   snapshot's exact per-key directives, first fill block "keys" with
+   the dominant (mode) color among the snapshot's OWN Main Board keys
+   (factored into a shared `_excluded_from_main_board()` helper, also
+   used by `set_main_board_color`) -- this is, by definition, what the
+   whole board was bulk-filled to when the profile was saved, so it's
+   the correct color for the six keys too, not a guess. The per-key
+   directives applied immediately after override the fill for every
+   individually-addressable key back to its exact saved value, so
+   nothing else is approximated. Confirmed live by the user after
+   loading a real saved profile ("1"): the six keys matched the
+   profile's Main Board color both on the physical keyboard and in
+   the GUI preview.
+
+Also did a small GUI polish pass per user request: "Pick Color &
+Apply" (Backlight tab) and "Save Current as Profile..." (Profiles
+tab) now use a distinct blue accent style (`QPushButton#Primary`) to
+stand out as the primary action in each tab, instead of looking
+identical to every other button.
+
+All of the above verified against the real device before being
+called done -- compiled (`py_compile`), smoke-tested (every tab
+class instantiated headless via `QT_QPA_PLATFORM=offscreen`), then
+launched for real and confirmed visually by the user at each step,
+per the "no more mistakes, verify yourself" standing rule.
