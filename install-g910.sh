@@ -26,8 +26,15 @@ echo "=== 1/2: Official repo packages ==="
 # and uses keyledsctl/libkeyleds.so via ctypes instead, see
 # G910_SKELETON.md) -- kept here anyway since it was part of the
 # original confirmed-working install and costs nothing to have.
+# ydotool: macro replay mechanism for g910_macro_daemon.py (same
+# mechanism the sibling G510s project's daemon already uses). Official
+# extra repo, not AUR -- confirmed via `pacman -Si`/`pacman -Fl` before
+# adding it here, not assumed. Ships both the `ydotool` client and the
+# `ydotoold` background daemon it talks to, plus its own systemd --user
+# service unit and udev rule for uinput permissions -- nothing to
+# hand-write for those.
 sudo pacman -S --needed base-devel git cmake libevdev libuv libx11 libxi \
-    libyaml luajit systemd-libs python-pyqt5 python-evdev python-dbus
+    libyaml luajit systemd-libs python-pyqt5 python-evdev python-dbus ydotool
 
 echo "=== 2/2: AUR package (keyleds -- needs yay) ==="
 if ! command -v yay &>/dev/null; then
@@ -41,8 +48,15 @@ fi
 yay -S --needed keyleds
 
 echo
+echo "=== ydotoold: enabling the replay daemon's own background service ==="
+systemctl --user enable --now ydotool.service
+
+echo
 echo "=== Done ==="
-echo "Verify with: keyledsctl list"
+echo "Verify keyleds with: keyledsctl list"
 echo "Should show this G910 (046d:c335) at a /dev/hidrawN path. If the"
 echo "udev rule hasn't picked up yet, replug the keyboard or run:"
 echo "  sudo udevadm control --reload && sudo udevadm trigger"
+echo
+echo "Verify ydotool with: ydotool key 28:1 28:0   (should send an Enter"
+echo "keypress wherever your cursor currently has focus)"
