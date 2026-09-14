@@ -31,7 +31,7 @@ instead of a G510s. Two tabs only, no LCD tab (G910 has no screen):
     MR as a 4th M-profile, which is what one of the reference projects
     below does by default).
 
-## HARDWARE FACTS -- CONFIRMED EMPIRICALLY on ac130arch (2026-09-13)
+## HARDWARE FACTS -- CONFIRMED EMPIRICALLY on this machine (2026-09-13)
 Do NOT re-derive these, they were checked directly on the real device,
 not assumed:
 - USB ID 046d:c335, lsusb identifies it as "G910 Orion Spectrum
