@@ -37,7 +37,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QPushButton, QColorDialog, QLabel, QSlider, QTabWidget,
-    QDialog, QLineEdit, QMessageBox, QInputDialog, QFrame,
+    QDialog, QLineEdit, QMessageBox, QInputDialog, QFrame, QScrollArea,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor
@@ -145,6 +145,29 @@ QLineEdit {
     border-radius: 4px;
     padding: 5px;
 }
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #34343a;
+    border-radius: 5px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #46454e;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
 """
 
 
@@ -209,6 +232,18 @@ class ColorModeSidebar(QWidget):
         apply_btn.clicked.connect(self.on_apply)
         layout.addWidget(apply_btn)
 
+        layout.addSpacing(8)
+        layout.addWidget(QLabel("Or type a hex code:"))
+        hex_row = QHBoxLayout()
+        self.hex_edit = QLineEdit()
+        self.hex_edit.setPlaceholderText("8000ff")
+        self.hex_edit.returnPressed.connect(self.on_apply_hex)
+        hex_apply_btn = QPushButton("Apply")
+        hex_apply_btn.clicked.connect(self.on_apply_hex)
+        hex_row.addWidget(self.hex_edit)
+        hex_row.addWidget(hex_apply_btn)
+        layout.addLayout(hex_row)
+
         self.status_label = QLabel("")
         self.status_label.setObjectName("Status")
         self.status_label.setWordWrap(True)
@@ -245,6 +280,27 @@ class ColorModeSidebar(QWidget):
         color = QColorDialog.getColor()
         if not color.isValid():
             return
+        self._apply_color(color)
+
+    def on_apply_hex(self):
+        """Real bug found via live use: KDE's own color-picker dialog
+        (QColorDialog.getColor() -- not our code, native Qt/KDE) was
+        misregistering swatch/gradient clicks -- every pick landed on
+        roughly the same blue-violet regardless of which swatch was
+        clicked (confirmed: picking a clearly purple swatch showed
+        HTML #5500ff, RGB(85,0,255) -- genuinely blue-leaning, not
+        purple, in the dialog's own readout, so this isn't a
+        perception thing). Nothing in this app renders that dialog, so
+        it can't be fixed here -- this hex field is a reliable
+        alternate path that bypasses the picker's gradient square
+        entirely."""
+        text = self.hex_edit.text().strip().lstrip("#")
+        if len(text) != 6 or any(c not in "0123456789abcdefABCDEF" for c in text):
+            self.status_label.setText("Invalid hex color -- use 6 hex digits, e.g. 8000ff")
+            return
+        self._apply_color(QColor(f"#{text}"))
+
+    def _apply_color(self, color):
         scaled = scale_color(color, self.brightness_pct)
         hexcolor = scaled.name().lstrip("#")
         # ZONE_SELECTION_KEYS, not ZONE_KEYS: for Main Board this also
@@ -659,15 +715,39 @@ class ProfilesTab(QWidget):
 
         layout.addSpacing(16)
         layout.addWidget(QLabel("<b>Saved profiles</b>"))
+
+        # Real bug found via live use: with no scroll area, saving
+        # enough profiles to exceed the window's height just laid the
+        # extra rows out past the bottom edge -- invisible, unreachable,
+        # no scrollbar, nothing telling you they were even still there
+        # (they were: this is purely a rendering bug, the data was
+        # always intact in g910_profiles.json). Wrapping the list in a
+        # QScrollArea instead of adding it to the panel directly means
+        # any number of saved profiles stay reachable by scrolling.
         self.list_layout = QVBoxLayout()
-        layout.addLayout(self.list_layout)
+        self.list_layout.setSpacing(6)
+        list_container = QWidget()
+        list_container.setLayout(self.list_layout)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Capped, not stretched to fill the panel's full remaining
+        # height -- with a stretch factor and few profiles, the
+        # resizable container stretched to match the viewport, leaving
+        # a big blank gap below the actual cards before the status
+        # label. A fixed cap gives predictable behavior either way:
+        # short lists sit compact, long lists scroll within this box.
+        scroll.setMaximumHeight(260)
+        scroll.setWidget(list_container)
+        layout.addWidget(scroll)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("Status")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        layout.addStretch()
+        layout.addStretch()  # leftover space collects here, below everything, not inside the capped scroll box
         self.setLayout(layout)
 
         self.refresh_list()
@@ -683,17 +763,32 @@ class ProfilesTab(QWidget):
             self.list_layout.addWidget(QLabel("No profiles saved yet."))
             return
         for name in names:
-            row = QHBoxLayout()
-            row.addWidget(QLabel(name))
-            row.addStretch()
+            # Stacked (name above Load/Delete), not side-by-side -- a
+            # single row ran out of horizontal space for long names
+            # once the scroll area's own scrollbar (added for the
+            # overflow fix above) ate into this already-narrow 220px
+            # panel, and a fixed width can never truly be "wide enough"
+            # for an arbitrary user-typed name anyway. Stacking is
+            # robust to any name length instead of guessing a width.
+            entry = QVBoxLayout()
+            entry.setContentsMargins(8, 6, 8, 6)
+            entry.setSpacing(4)
+            name_label = QLabel(name)
+            name_label.setWordWrap(True)
+            name_label.setAlignment(Qt.AlignCenter)
+            entry.addWidget(name_label)
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(6)
             load_btn = QPushButton("Load")
             load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
             delete_btn = QPushButton("Delete")
             delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
-            row.addWidget(load_btn)
-            row.addWidget(delete_btn)
+            btn_row.addWidget(load_btn)
+            btn_row.addWidget(delete_btn)
+            entry.addLayout(btn_row)
             container = QWidget()
-            container.setLayout(row)
+            container.setObjectName("Panel")
+            container.setLayout(entry)
             self.list_layout.addWidget(container)
 
     def on_save(self):
