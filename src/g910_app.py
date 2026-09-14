@@ -585,6 +585,32 @@ class GKeysTab(QWidget):
             print(f"FAILED to light {name} LED: {err}")
         if self.canvas is not None:
             self.canvas.set_active_mkey(name)
+        self._write_active_profile(name)
+        self.refresh_assigned_keys()
+
+    def _write_active_profile(self, name):
+        """Real bug found and fixed: clicking M1/M2/M3 here used to
+        only update the LED/canvas -- never told g910_macro_daemon.py,
+        so a real G-key press right after would replay the OLD
+        profile's macro while the screen showed the new one, and
+        poll_active_profile() below would silently revert the GUI back
+        within ~500ms since this file never changed. Same class of bug
+        found and fixed on the sibling G510s app/daemon. The daemon now
+        reads this file back on every wake (see its read_active_profile
+        docstring), not just when it writes it itself on a physical
+        M-key press."""
+        import os
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+        Path(runtime, "g910_macro_profile").write_text(name)
+
+    def refresh_assigned_keys(self):
+        """Gold border on G-keys with a macro saved in the CURRENT
+        profile, so it's visible at a glance which keys are already
+        programmed without opening every dialog -- requested by the
+        user, matching what the sibling G510s app's canvas just got."""
+        assigned = load_macros().get(self.current_profile, {})
+        for name, btn in self.key_buttons.items():
+            btn.setStyleSheet("border: 2px solid #d4af37;" if name in assigned else "")
 
     def poll_active_profile(self):
         import os
@@ -600,6 +626,7 @@ class GKeysTab(QWidget):
     def open_key_dialog(self, gkey):
         dlg = MacroRecordDialog(self.current_profile, gkey, self)
         dlg.exec_()
+        self.refresh_assigned_keys()  # macro may have just been saved/cleared
 
 
 # --- Profiles tab: save/load full lighting snapshots -------------------

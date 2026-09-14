@@ -60,6 +60,24 @@ def write_active_profile(name):
     Path(runtime, "g910_macro_profile").write_text(name)
 
 
+def read_active_profile():
+    """Real bug found and fixed: clicking M1/M2/M3 in the GUI used to
+    only update the on-screen highlight + LED, never told this daemon
+    -- so a real G-key press right after would replay the OLD
+    profile's macro while the screen showed the new one, and the GUI's
+    own poll_active_profile() would silently revert the highlight back
+    within ~500ms since this file never changed. Same class of bug
+    found and fixed on the sibling G510s daemon. Fix: the GUI now also
+    writes this file on a click (see GKeysTab.select_profile in
+    g910_app.py), and main()'s loop calls this on every wake (not just
+    on a physical M-key press) to pick that up."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+    try:
+        return Path(runtime, "g910_macro_profile").read_text().strip()
+    except Exception:
+        return None
+
+
 def replay(entry):
     """Runs in its own thread (see main()) so a slow macro/command can
     never block the read loop and delay/miss the next real HID++
@@ -135,7 +153,17 @@ def main():
     fd = os.open(DEVICE_PATH, os.O_RDONLY)
     try:
         while True:
-            r, _, _ = select.select([fd], [], [])
+            # Timeout (was blocking forever) so this wakes up on its
+            # own to pick up a GUI-originated profile change even with
+            # no HID++ traffic -- see read_active_profile()'s docstring.
+            r, _, _ = select.select([fd], [], [], 0.5)
+
+            live_profile = read_active_profile()
+            if live_profile in ("M1", "M2", "M3") and live_profile != active_profile:
+                active_profile = live_profile
+
+            if not r:
+                continue
             data = os.read(fd, 64)
             decoded = decode_report(data)
             if decoded is None:
