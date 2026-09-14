@@ -17,6 +17,9 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 echo "=== 1/2: Official repo packages ==="
+# Check-then-report before installing anything, rather than a silent
+# `pacman -S --needed` black box -- prints what's already present vs.
+# what's about to actually change, per explicit request.
 # base-devel/git/cmake = AUR build tooling for the keyleds package below.
 # libevdev/libuv/libx11/libxi/libyaml/luajit/systemd-libs = keyleds's own
 # Depends (pre-installed here so yay won't prompt mid-build).
@@ -33,19 +36,38 @@ echo "=== 1/2: Official repo packages ==="
 # `ydotoold` background daemon it talks to, plus its own systemd --user
 # service unit and udev rule for uinput permissions -- nothing to
 # hand-write for those.
-sudo pacman -S --needed base-devel git cmake libevdev libuv libx11 libxi \
-    libyaml luajit systemd-libs python-pyqt5 python-evdev python-dbus ydotool
+REPO_PKGS="base-devel git cmake libevdev libuv libx11 libxi libyaml luajit systemd-libs python-pyqt5 python-evdev python-dbus ydotool"
+MISSING=""
+for pkg in $REPO_PKGS; do
+    if pacman -Qi "$pkg" &>/dev/null; then
+        echo "  [ok]      $pkg"
+    else
+        echo "  [missing] $pkg"
+        MISSING="$MISSING $pkg"
+    fi
+done
+if [ -n "$MISSING" ]; then
+    echo "Installing:$MISSING"
+    sudo pacman -S --needed $MISSING
+else
+    echo "All official-repo dependencies already present."
+fi
 
 echo "=== 2/2: AUR package (keyleds -- needs yay) ==="
-if ! command -v yay &>/dev/null; then
-    echo "yay not found. Install an AUR helper first, then re-run this script."
-    echo "(https://github.com/Jguer/yay -- or use paru/whatever you prefer, just"
-    echo " make sure the 'keyleds' package ends up installed -- NOT 'keyleds-git',"
-    echo " that's the abandoned original upstream. See G910_README.txt DECISIONS"
-    echo " section for why.)"
-    exit 1
+if pacman -Qi keyleds &>/dev/null; then
+    echo "  [ok] keyleds"
+else
+    echo "  [missing] keyleds"
+    if ! command -v yay &>/dev/null; then
+        echo "yay not found -- can't auto-install keyleds. Install an AUR helper"
+        echo "first (https://github.com/Jguer/yay -- or paru/whatever you prefer),"
+        echo "then re-run this script. Make sure the 'keyleds' package ends up"
+        echo "installed -- NOT 'keyleds-git', that's the abandoned original"
+        echo "upstream. See G910_README.txt DECISIONS section for why."
+        exit 1
+    fi
+    yay -S --needed keyleds
 fi
-yay -S --needed keyleds
 
 echo
 echo "=== ydotoold: enabling the replay daemon's own background service ==="
@@ -54,7 +76,10 @@ systemctl --user enable --now ydotool.service
 echo
 echo "=== systemd --user service: g910-macro-daemon (G-key/M-key playback) ==="
 mkdir -p ~/.config/systemd/user
-cp services/g910-macro-daemon.service ~/.config/systemd/user/
+# Checked-in file has a __PROJECT_DIR__ placeholder instead of a real
+# path (matches the sibling G510s installer's pattern) -- substitute
+# it here rather than committing any one checkout's location.
+sed "s|__PROJECT_DIR__|$DIR|g" services/g910-macro-daemon.service > ~/.config/systemd/user/g910-macro-daemon.service
 systemctl --user daemon-reload
 systemctl --user enable --now g910-macro-daemon.service
 
@@ -66,24 +91,34 @@ echo "=== Desktop launcher ==="
 # to be hardcoded to one specific machine/user and silently breaks
 # anywhere else (found during a reboot-safety audit). Generating it
 # here from $DIR avoids repeating that exact mistake.
-DESKTOP_FILE="$HOME/Desktop/G910 Control.desktop"
-mkdir -p "$HOME/Desktop"
-cat > "$DESKTOP_FILE" <<EOF
-[Desktop Entry]
+#
+# Written to BOTH ~/Desktop (a literal desktop icon) AND
+# ~/.local/share/applications (the standard XDG location every
+# desktop environment's app menu/launcher actually reads) -- several
+# DEs, GNOME notably, don't show desktop icons at all by default, so
+# ~/Desktop alone would make the app undiscoverable there regardless
+# of the path being correct.
+DESKTOP_ENTRY="[Desktop Entry]
 Type=Application
 Name=G910 Control
 Comment=Logitech G910 Orion Spectrum RGB + macro control
-Exec=python3 "$DIR/src/g910_app.py"
+Exec=python3 \"$DIR/src/g910_app.py\"
 Path=$DIR/src
 Icon=input-keyboard
 Terminal=false
-Categories=Utility;
-EOF
-chmod +x "$DESKTOP_FILE"
+Categories=Utility;"
+
+mkdir -p "$HOME/Desktop"
+echo "$DESKTOP_ENTRY" > "$HOME/Desktop/G910 Control.desktop"
+chmod +x "$HOME/Desktop/G910 Control.desktop"
 # GNOME/Nautilus also needs an explicit "trusted" flag or it shows an
 # "Untrusted application launcher" warning instead of running --
 # harmless no-op if gio isn't installed (e.g. KDE-only systems).
-command -v gio &>/dev/null && gio set "$DESKTOP_FILE" metadata::trusted true 2>/dev/null || true
+command -v gio &>/dev/null && gio set "$HOME/Desktop/G910 Control.desktop" metadata::trusted true 2>/dev/null || true
+
+mkdir -p "$HOME/.local/share/applications"
+echo "$DESKTOP_ENTRY" > "$HOME/.local/share/applications/g910-control.desktop"
+chmod +x "$HOME/.local/share/applications/g910-control.desktop"
 
 echo
 echo "=== Done ==="
