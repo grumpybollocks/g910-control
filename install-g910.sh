@@ -54,7 +54,10 @@ systemctl --user enable --now ydotool.service
 echo
 echo "=== systemd --user service: g910-macro-daemon (G-key/M-key playback) ==="
 mkdir -p ~/.config/systemd/user
-cp services/g910-macro-daemon.service ~/.config/systemd/user/
+# Checked-in file has a __PROJECT_DIR__ placeholder instead of a real path
+# (same reasoning as the desktop launcher above) -- substitute it here
+# rather than committing any one checkout's location.
+sed "s|__PROJECT_DIR__|$DIR|g" services/g910-macro-daemon.service > ~/.config/systemd/user/g910-macro-daemon.service
 systemctl --user daemon-reload
 systemctl --user enable --now g910-macro-daemon.service
 
