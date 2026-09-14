@@ -671,3 +671,51 @@ saved in the currently active profile (`GKeysTab.
 refresh_assigned_keys()`, called on profile switch and after the
 macro dialog closes) -- a feature request relayed from the user after
 it was built on the G510s app's canvas first. Confirmed working live.
+
+### Profiles panel overflow + color-picker workaround (2026-09-15, phase 1 wrap-up)
+
+**Real bug**: `ProfilesTab`'s saved-profiles list had no scroll
+container -- a plain `QVBoxLayout` added straight into the fixed-width
+panel. Saving enough profiles to exceed the window's height just laid
+the extra rows out past the bottom edge: invisible, unreachable, no
+scrollbar. Not data loss (every profile was always intact in
+`g910_profiles.json`, confirmed by reading the file directly) -- pure
+rendering bug. Fixed: wrapped the list in a `QScrollArea`
+(`setWidgetResizable(True)`, capped at 260px so a short list doesn't
+stretch into a big blank gap before the status label), added matching
+dark-theme `QScrollBar`/`QScrollArea` QSS.
+
+That fix immediately surfaced two follow-on issues, both from live
+use, both fixed the same session: each profile row's Load/Delete
+buttons got cut off once the scrollbar ate into the already-narrow
+220px panel width -- fixed by stacking the name above the buttons
+instead of side-by-side (also more robust to arbitrarily long profile
+names than any fixed width could be). And the profile name text
+wasn't centered -- fixed.
+
+**Color picker investigation**: the user reported purple consistently
+applying as blue, "used to work." Traced this all the way down before
+concluding anything: `bl.set_group_color()`/`set_main_board_color()`
+called directly against the real device, across every block (keys,
+gkeys, logo) -- each one sent `#8000ff` and `keyledsctl get-leds` read
+back the exact same `#8000ff` every time, no exceptions. The actual
+GUI code path (`ColorModeSidebar.on_apply_hex()`) tested the same way
+with the same clean result. Checked git history for any change to the
+color pipeline that could explain a regression -- found none, and no
+prior record of purple specifically being verified working before
+this. Since KDE's own native `QColorDialog` (not our code at all) was
+also suspected -- the screenshot the user sent showed its own hex
+readout as `#5500ff` regardless of which swatch was clicked -- added a
+manual hex-entry field (`ColorModeSidebar.hex_edit` +
+`on_apply_hex()`) as a reliable path that bypasses the picker's
+gradient square entirely, refactoring the shared apply logic into
+`_apply_color()` so both paths (dialog and hex field) go through the
+same code. In the end the user confirmed the keys showed correctly as
+purple -- resolved, cause never fully pinned down (possibly a
+transient rendering state, possibly the hex field itself being the
+fix), but the hex-entry field stays as a permanent, more reliable
+alternative to the picker regardless.
+
+**Phase 1 status**: with these fixed, G910 is being treated as having
+reached its first complete, stable stage -- further features/polish
+come later, this is a deliberate stopping point, not "done forever."
