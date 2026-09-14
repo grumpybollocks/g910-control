@@ -591,3 +591,51 @@ All of the above compiled clean (`py_compile`) and smoke-tested
 each real launch; every visual claim in this section was confirmed by
 the user actually looking at the running app, not assumed from the
 code.
+
+### Final bug check (2026-09-14)
+
+Full pass over all four G910 Python files (`g910_app.py`,
+`g910_backlight.py`, `g910_canvas.py`, `g910_macro_daemon.py`) before
+calling this app done for now:
+
+- `py_compile` + `ast.parse` clean on all four.
+- Grepped for bare/broad `except:` blocks, TODO/FIXME/HACK markers,
+  and every `subprocess.run()` call site -- checked each one by hand.
+  All four `except Exception:` blocks are the same deliberate pattern
+  (malformed/missing JSON profile or macro file -> fall back to empty
+  defaults instead of crashing), and every `subprocess.run()` call
+  checks `returncode` and surfaces the error -- no silent failures
+  found.
+- Manually traced the trickier logic for a second time looking for
+  edge cases: `_FUNCTION_ROW_KEYS`'s `"F" + isdigit()` filter against
+  the standalone `"F"` key (ASDF row) -- `"F"[1:]` is `""`, and
+  `"".isdigit()` is `False`, so it's correctly excluded, not a bug.
+  `on_mkey_clicked`'s MR-toggle failure path correctly reverts
+  `self._mr_active` and returns without touching the canvas, so a
+  failed hardware write never desyncs the displayed state from reality.
+- **Real finding, not just a stale comment**: the class `BacklightTab`
+  had drifted badly out of sync with what it actually does -- it
+  started as literally the Backlight tab, then quietly became the
+  entire app (sidebar + canvas + G-Keys strip + Profiles panel) as
+  G-Keys and Profiles got merged in over the session, but the name and
+  every docstring/comment referencing it still said "Backlight tab."
+  Renamed to `MainView` throughout `g910_app.py` (class definition,
+  `GKeysTab`'s docstring, `ProfilesTab`'s docstring, `MainWindow`'s
+  instantiation, section comments), and fixed the module's own
+  top-of-file docstring, which still claimed the app was "now tabbed"
+  -- it hasn't had a single tab since G-Keys and Profiles moved in.
+  Not a functional bug (nothing broke), but exactly the kind of stale
+  documentation that causes a real bug later when someone trusts it.
+- Verified live against the real hardware (this machine has the G910
+  attached): `get_all_live_colors()` still reads all 115 keys,
+  `set_mkey_led()`/`set_mrkey_led()` round-tripped cleanly (M2 then
+  back to M1, MR on then off), the macro daemon has been running 9+
+  hours with zero warnings in `journalctl`, the desktop launcher's
+  exact `Exec=` command still launches cleanly, and the app itself
+  launched with no errors after the rename.
+- Known, deliberate (not a bug) remaining gap, restated for
+  visibility: MR only toggles its own LED indicator today. It does
+  NOT arm/disarm any actual recording behavior in the daemon -- that
+  was scoped out explicitly earlier in this project and still isn't
+  designed. Anyone picking this up next should treat that as an open
+  feature, not a bug to "fix."
