@@ -639,3 +639,35 @@ calling this app done for now:
   was scoped out explicitly earlier in this project and still isn't
   designed. Anyone picking this up next should treat that as an open
   feature, not a bug to "fix."
+
+### GUI-daemon profile desync bug + gold border on assigned keys (2026-09-14)
+
+The sibling G510s project's session found and fixed a real bug on
+their side, then flagged the same class of bug might exist here --
+checked, and it did.
+
+**The bug**: `GKeysTab.select_profile()` (clicking M1/M2/M3 in the
+GUI) only ever updated the LED and the canvas highlight -- it never
+wrote `g910_macro_profile`, the status file `g910_macro_daemon.py`
+uses to know which profile is active. The daemon only wrote that file
+itself, on a real physical M-key press, and its `select.select([fd],
+[], [])` blocked forever with no timeout, so it had no way to notice
+an external change even if the file did change. Net effect: click M2
+in the GUI, press a G-key -> daemon replays the OLD profile's macro
+while the screen shows M2, and within ~500ms `poll_active_profile()`
+silently flips the GUI back to whatever the daemon still thinks is
+active. Confirmed live before calling it a bug (not just theorized
+from reading the code) -- clicking M2 did visibly revert on its own.
+
+**The fix**: `select_profile()` now writes the same status file
+(`_write_active_profile`); the daemon's loop gained a 0.5s `select()`
+timeout so it wakes up on its own and checks the file via the new
+`read_active_profile()` on every wake, not just when it writes the
+file itself. Confirmed live: clicked M2, waited several seconds,
+stayed on M2.
+
+**Also added**: a gold border on G-key buttons that have a macro
+saved in the currently active profile (`GKeysTab.
+refresh_assigned_keys()`, called on profile switch and after the
+macro dialog closes) -- a feature request relayed from the user after
+it was built on the G510s app's canvas first. Confirmed working live.
