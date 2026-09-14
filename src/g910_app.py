@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-G910 Control App -- canvas-based rearchitecture, now tabbed.
+G910 Control App -- canvas-based rearchitecture. Single unified view,
+NOT tabbed (Backlight/G-Keys/Profiles started as separate tabs, all
+three were merged into one view over several rounds of UI work -- see
+G910_CANVAS_PLAN.md for that history).
 
-Backlight tab: real per-key geometry canvas (g910_canvas.KeyboardCanvas)
-+ a Color Mode sidebar for bulk zone coloring. Selecting a zone
-highlights those keys on the canvas; applying a color previews it
-there too, not just on the real hardware. See G910_CANVAS_PLAN.md.
+MainView: real per-key geometry canvas (g910_canvas.KeyboardCanvas) +
+a Color Mode sidebar for bulk zone coloring on the left, a G-Key
+Macros strip under the canvas, and a Profiles panel on the right.
+Selecting a zone in the sidebar highlights those keys on the canvas;
+applying a color previews it there too, not just on the real hardware.
 
 Brightness: this keyboard's LED protocol has no separate hardware
 brightness call (block "keys"'s feature functions are just
@@ -14,17 +18,16 @@ reading feature_leds.c directly, see G910_README.txt). So brightness
 here means what it means for any RGB device without one: scale the
 chosen color's R/G/B by the brightness percentage before sending.
 
-G-Key Macros panel: embedded in the Backlight tab (to the right of the
-canvas, in what used to be empty space -- moved out of its own tab by
-request). Macro record/playback for G1-G9, switchable via M1/M2/M3
-profiles -- ports g510_app.py's proven RecorderThread/MacroRecordDialog
-pattern almost verbatim. Recording device confirmed empirically this
-session (not assumed): /dev/input/event2, stable by-id path below,
-is the one that actually fires during real typing (event3 fires
-nothing -- tested live by listening on both while the user typed).
-MR is NOT a 4th profile here (per the user's earlier explicit
-decision: it's a literal macro-record toggle, a separate feature for
-the future macro daemon, not a GUI profile selector).
+G-Key Macros panel: a compact strip under the canvas. Macro record/
+playback for G1-G9, switchable via M1/M2/M3 profiles -- ports
+g510_app.py's proven RecorderThread/MacroRecordDialog pattern almost
+verbatim. Recording device confirmed empirically this session (not
+assumed): /dev/input/event2, stable by-id path below, is the one that
+actually fires during real typing (event3 fires nothing -- tested live
+by listening on both while the user typed). MR is NOT a 4th profile
+here (per the user's earlier explicit decision: it's a literal
+macro-record toggle, a separate feature for the future macro daemon,
+not a GUI profile selector).
 """
 import sys
 import json
@@ -153,7 +156,7 @@ def scale_color(color, brightness_pct):
     return QColor(r, g, b)
 
 
-# --- Backlight tab -----------------------------------------------------
+# --- Color Mode sidebar (left side of MainView) -----------------------
 
 class ColorModeSidebar(QWidget):
     """Select a zone, set brightness, pick a color, Apply it to that
@@ -283,7 +286,12 @@ def _vseparator():
     return line
 
 
-class BacklightTab(QWidget):
+class MainView(QWidget):
+    """Everything: Color Mode sidebar (left), keyboard canvas + G-Key
+    Macros strip (middle), Profiles panel (right). Started as a
+    "Backlight tab" before G-Keys and Profiles were merged in from
+    their own tabs -- name kept in sync with what it actually is now,
+    not what it used to be."""
     def __init__(self):
         super().__init__()
         outer = QHBoxLayout()
@@ -346,7 +354,7 @@ class BacklightTab(QWidget):
             self.gkeys_panel.select_profile(name)
 
 
-# --- G-Key Macros panel (embedded in Backlight tab; ported from
+# --- G-Key Macros panel (embedded in MainView; ported from
 # g510_app.py's proven pattern) --------------------------------------
 
 def load_macros():
@@ -514,7 +522,7 @@ class MacroRecordDialog(QDialog):
 class GKeysTab(QWidget):
     """M1/M2/M3 profile toggle + G1-G9 macro buttons, as a single
     compact horizontal strip -- lives directly under the canvas (see
-    BacklightTab), not in its own tab/panel, so it has to be short.
+    MainView), not in its own tab/panel, so it has to be short.
     MR is intentionally NOT a profile here -- it's a literal
     macro-record toggle for the future physical-key-driven daemon, not
     a 4th GUI profile (the user's explicit decision earlier in this
@@ -603,7 +611,7 @@ class ProfilesTab(QWidget):
     combination. Backend already verified directly against the real
     device before this UI was wired to it -- save/load/delete/list all
     confirmed working (real snapshot captured, real color match
-    confirmed after replay). Takes the Backlight tab's canvas so a
+    confirmed after replay). Takes MainView's canvas so a
     successful Load can refresh the preview to match -- otherwise the
     canvas would keep showing whatever was there before the load."""
     def __init__(self, canvas):
@@ -709,7 +717,7 @@ class MainWindow(QMainWindow):
         # single view now (G-Keys and Profiles used to be separate
         # tabs, moved in one at a time into what used to be empty
         # space around the canvas, by request).
-        self.setCentralWidget(BacklightTab())
+        self.setCentralWidget(MainView())
 
         # Size to the actual content instead of a hardcoded guess --
         # was 1500x460, but the real layout needs less width than that
