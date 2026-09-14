@@ -61,10 +61,10 @@ not assumed:
 - `yay` is available as the AUR helper.
 
 ## GITHUB ACCESS -- SET UP 2026-09-13
-This machine (ac130arch) did NOT have GitHub SSH access before this
-project -- the only existing key (~/.ssh/id_ed25519, comment
-"ac130arch-to-tria") is for the separate Arch-to-Arch cross-machine
-bridge to AC130Tria, not GitHub, and was never registered on GitHub.
+This machine did NOT have GitHub SSH access before this
+project -- the only existing key (~/.ssh/id_ed25519) is for a
+separate cross-machine bridge to the user's other Arch box, not
+GitHub, and was never registered on GitHub.
 Fixed by generating a SEPARATE dedicated key:
   ~/.ssh/id_ed25519_github (public half added to the user's GitHub
   account by the user themselves)
