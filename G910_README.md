@@ -4,7 +4,7 @@ LCD app -- diverging from here). This file documents the G910 project
 specifically; README.txt in this same repo is the G510s LCD project's
 docs and describes different hardware -- don't conflate the two.
 
-STATUS FOR AI AGENTS -- read this block first:
+PROJECT STATUS -- read this block first:
 
 PLANNING PHASE. NO APP CODE WRITTEN YET. Do not start implementation
 until the user explicitly signs off on the finalized plan below --
