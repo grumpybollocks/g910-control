@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=G910 Control
+Comment=Logitech G910 Orion Spectrum RGB + macro control
+Exec=/usr/bin/g910-control
+Icon=input-keyboard
+Terminal=false
+Categories=Utility;
