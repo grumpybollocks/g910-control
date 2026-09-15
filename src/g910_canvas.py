@@ -23,8 +23,8 @@ from PyQt5.QtWidgets import QWidget, QColorDialog, QApplication
 
 import g910_backlight as bl
 
-CELL_PX = 34
-GUTTER_PX = 4
+CELL_PX = 40
+GUTTER_PX = 5
 PADDING_PX = 10
 
 
