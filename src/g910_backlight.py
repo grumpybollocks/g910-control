@@ -33,9 +33,9 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 def _find_device():
     """Ask keyledsctl itself which hidraw path is the G910 (046d:c335),
     instead of a hardcoded by-id symlink -- that symlink embeds this
-    exact physical unit's USB serial (096239583837 on this machine,
-    confirmed via `udevadm info` to be per-unit, not a fixed model
-    string), so it would never match a different person's G910. keyledsctl
+    exact physical unit's USB serial -- confirmed via `udevadm info`
+    that this serial is per-unit, not a fixed model string, so it
+    would never match a different person's G910. keyledsctl
     is already a hard runtime dependency and its own `list` command
     already resolves the correct interface (confirmed live: it reports
     exactly one line for this device, matching the same hidraw node the
