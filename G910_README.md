@@ -71,9 +71,8 @@ Fixed by generating a SEPARATE dedicated key:
   ~/.ssh/config now has:
     Host github.com
         IdentityFile ~/.ssh/id_ed25519_github
-Verified working: `ssh -T git@github.com` returns "Hi grumpybollocks!
-You've successfully authenticated". Don't recreate this key or config
--- it's done.
+Verified working: `ssh -T git@github.com` returns a successful
+authentication message. Don't recreate this key or config -- it's done.
 
 ## DECISIONS -- FINALIZED after a deep research pass (2026-09-13)
 - MR key = literal macro-record toggle. CONFIRMED user decision.
