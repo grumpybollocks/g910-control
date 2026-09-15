@@ -61,9 +61,18 @@ def _find_g910_event_device():
     that fires real keypress events; interface 1 fires nothing. Returns
     None (rather than raising) if no G910 is attached -- the app can
     still open without one, only macro recording actually needs it.
+    Each device is opened defensively: a permission error or a device
+    disappearing mid-enumeration (real races on a real desktop, not
+    hypothetical) skips that one device instead of crashing the whole
+    app at import time -- this function touches every input device on
+    the system, unlike the old hardcoded string it replaced, which
+    never opened anything until actual use.
     """
     for path in evdev.list_devices():
-        dev = evdev.InputDevice(path)
+        try:
+            dev = evdev.InputDevice(path)
+        except OSError:
+            continue
         if (dev.info.vendor, dev.info.product) == (0x046D, 0xC335) and dev.phys.endswith("input0"):
             return path
     return None
