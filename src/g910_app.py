@@ -45,11 +45,31 @@ import evdev
 from evdev import ecodes
 
 import g910_backlight as bl
-from g910_canvas import KeyboardCanvas, ZONE_KEYS, ZONE_SELECTION_KEYS
+from g910_canvas import KeyboardCanvas, ZONE_KEYS, ZONE_SELECTION_KEYS, PRESET_COLORS
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-MACROS_FILE = PROJECT_DIR / "g910_macros.json"  # separate from the G510s's macros.json
-MAIN_KEYBOARD_DEVICE = "/dev/input/by-id/usb-Logitech_Gaming_Keyboard_G910_096239583837-event-kbd"
+MACROS_FILE = bl.DATA_DIR / "g910_macros.json"  # separate from the G510s's macros.json
+
+
+def _find_g910_event_device():
+    """Match the G910's base HID interface by vendor/product ID
+    (046d:c335) + physical interface number, not by-id's embedded
+    per-unit USB serial -- that serial (096239583837 on this machine,
+    confirmed via `udevadm info` to be per-unit, not a fixed model
+    string) would never match a different person's G910. Interface 0
+    (phys ends "/input0") is confirmed empirically (this session, by
+    listening on both interfaces while actually typing) to be the one
+    that fires real keypress events; interface 1 fires nothing. Returns
+    None (rather than raising) if no G910 is attached -- the app can
+    still open without one, only macro recording actually needs it.
+    """
+    for path in evdev.list_devices():
+        dev = evdev.InputDevice(path)
+        if (dev.info.vendor, dev.info.product) == (0x046D, 0xC335) and dev.phys.endswith("input0"):
+            return path
+    return None
+
+
+MAIN_KEYBOARD_DEVICE = _find_g910_event_device()
 
 STYLESHEET = """
 QWidget {
@@ -184,28 +204,6 @@ def scale_color(color, brightness_pct):
     g = max(0, min(255, round(color.green() * factor)))
     b = max(0, min(255, round(color.blue() * factor)))
     return QColor(r, g, b)
-
-
-# Same named palette as the sibling G510s app's COLOR_RGB, for a
-# one-click common-color path -- no fiddly gradient-square precision
-# needed for the colors people actually reach for most.
-# Real, standard colors -- not guessed hues. Sourced directly from
-# Xorg's own rgb.txt (via solaar's underlying logitech_receiver
-# library, special_keys.COLORS -- verified by reading that file
-# directly), the same canonical named-color list used across the
-# Linux desktop for decades. No white/near-white shades (not useful
-# for an RGB backlight preset) and no in-between/ambiguous hues.
-PRESET_COLORS = {
-    "Red": (0xFF, 0x00, 0x00),
-    "Orange": (0xFF, 0xA5, 0x00),
-    "Yellow": (0xFF, 0xFF, 0x00),
-    "Green": (0x00, 0xFF, 0x00),
-    "Blue": (0x00, 0x00, 0xFF),
-    "Purple": (0xA0, 0x20, 0xF0),
-    "Cyan": (0x00, 0xFF, 0xFF),
-    "Magenta": (0xFF, 0x00, 0xFF),
-    "Pink": (0xFF, 0xC0, 0xCB),
-}
 
 
 # --- Color Mode sidebar (left side of MainView) -----------------------
@@ -607,6 +605,9 @@ class MacroRecordDialog(QDialog):
 
     def toggle_recording(self):
         if self.recorder is None:
+            if MAIN_KEYBOARD_DEVICE is None:
+                self.status_label.setText("No G910 keyboard found -- is it plugged in?")
+                return
             self.status_label.setText("Recording... press your key combo, then click Stop.")
             self.record_btn.setText("Stop")
             self.recorder = RecorderThread()
