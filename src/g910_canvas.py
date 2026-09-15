@@ -19,13 +19,92 @@ from collections import Counter
 from dataclasses import dataclass
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont
-from PyQt5.QtWidgets import QWidget, QColorDialog, QApplication
+from PyQt5.QtWidgets import (
+    QWidget, QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QPushButton, QLineEdit, QLabel,
+)
 
 import g910_backlight as bl
 
 CELL_PX = 40
 GUTTER_PX = 5
 PADDING_PX = 10
+
+# Real, standard colors -- not guessed hues. Sourced directly from
+# Xorg's own rgb.txt (via solaar's underlying logitech_receiver
+# library, special_keys.COLORS -- verified by reading that file
+# directly), the same canonical named-color list used across the
+# Linux desktop for decades. No white/near-white shades (not useful
+# for an RGB backlight preset) and no in-between/ambiguous hues.
+# Lives here (not g910_app.py) so both the sidebar and this module's
+# own PresetHexDialog share one copy instead of drifting independently.
+PRESET_COLORS = {
+    "Red": (0xFF, 0x00, 0x00),
+    "Orange": (0xFF, 0xA5, 0x00),
+    "Yellow": (0xFF, 0xFF, 0x00),
+    "Green": (0x00, 0xFF, 0x00),
+    "Blue": (0x00, 0x00, 0xFF),
+    "Purple": (0xA0, 0x20, 0xF0),
+    "Cyan": (0x00, 0xFF, 0xFF),
+    "Magenta": (0xFF, 0x00, 0xFF),
+    "Pink": (0xFF, 0xC0, 0xCB),
+}
+
+
+class PresetHexDialog(QDialog):
+    """Small presets+hex color picker. Used by the canvas's own
+    drag-select coloring below, so it never falls back to Qt's native
+    QColorDialog -- that dialog's left-hand gradient column was the
+    exact "always picks blue" bug reported and fixed in the sidebar;
+    this was a second, independent code path that still had it."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pick a color")
+        self._result_color = None
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("<b>Hex code</b>"))
+        hex_row = QHBoxLayout()
+        self.hex_edit = QLineEdit()
+        self.hex_edit.setPlaceholderText("e.g. 8000ff")
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(self._apply_hex)
+        hex_row.addWidget(self.hex_edit)
+        hex_row.addWidget(apply_btn)
+        layout.addLayout(hex_row)
+
+        layout.addWidget(QLabel("<b>Presets</b>"))
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        for i, (name, rgb) in enumerate(PRESET_COLORS.items()):
+            btn = QPushButton()
+            btn.setFixedSize(28, 28)
+            btn.setToolTip(name)
+            btn.setStyleSheet(
+                f"background-color: rgb{rgb}; border: 1px solid #34343a; border-radius: 4px;"
+            )
+            btn.clicked.connect(lambda _checked, rgb=rgb: self._choose(QColor(*rgb)))
+            grid.addWidget(btn, i // 3, i % 3)
+        layout.addLayout(grid)
+
+        self.setLayout(layout)
+
+    def _apply_hex(self):
+        text = self.hex_edit.text().strip().lstrip("#")
+        if len(text) != 6 or any(c not in "0123456789abcdefABCDEF" for c in text):
+            return
+        self._choose(QColor(f"#{text}"))
+
+    def _choose(self, color):
+        self._result_color = color
+        self.accept()
+
+    @staticmethod
+    def get_color(parent=None):
+        dlg = PresetHexDialog(parent)
+        dlg.exec_()
+        return dlg._result_color
 
 
 @dataclass
@@ -442,8 +521,8 @@ class KeyboardCanvas(QWidget):
 
         if not self._selection:
             return
-        color = QColorDialog.getColor()
-        if not color.isValid():
+        color = PresetHexDialog.get_color(self)
+        if color is None:
             self._selection = set() if was_click else self._selection
             self.update()
             return
