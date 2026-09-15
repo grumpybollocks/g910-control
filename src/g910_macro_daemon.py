@@ -31,9 +31,8 @@ from pathlib import Path
 
 import g910_backlight as bl
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-MACROS_FILE = PROJECT_DIR / "g910_macros.json"
-DEVICE_PATH = bl.DEVICE  # stable by-id symlink, not a hardcoded hidrawN -- see g910_backlight.py's DEVICE comment
+MACROS_FILE = bl.DATA_DIR / "g910_macros.json"
+DEVICE_PATH = bl.DEVICE  # discovered dynamically -- see g910_backlight.py's _find_device()
 
 # Real bug found and fixed via a live diagnostic capture: a single real
 # G5 press was followed by clean press/release pairs repeating every
@@ -130,6 +129,11 @@ def decode_report(data):
 
 
 def main():
+    if DEVICE_PATH is None:
+        print("G910 not found (via keyledsctl list) -- is it plugged in? Exiting.",
+              file=sys.stderr, flush=True)
+        sys.exit(1)
+
     # G-keys default to F13-F21 passthrough and emit nothing on the
     # HID++ channel until explicitly enabled -- confirmed empirically
     # earlier this project (a capture attempt with zero setup produced

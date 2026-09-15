@@ -15,22 +15,52 @@ layout data.
 """
 import ctypes
 import json
+import os
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 
-# Stable by-id symlink, NOT a hardcoded hidrawN number -- hidraw
-# numbering is just enumeration order across EVERY hidraw device on the
-# system (mice, headsets, this keyboard's own second interface, etc.),
-# confirmed by checking `udevadm info` on every /dev/hidraw* node on
-# this machine: order is not guaranteed stable across reboots/replugs.
-# This exact symlink (serial + "-if01-hidraw" for the HID++ interface,
-# interface 1 of 2) is auto-created by udev's own built-in rules --
-# confirmed present with no custom udev rule needed, same mechanism
-# g910_app.py's MAIN_KEYBOARD_DEVICE already relies on for its event
-# node.
-DEVICE = "/dev/input/by-id/usb-Logitech_Gaming_Keyboard_G910_096239583837-if01-hidraw"
-PROFILES_FILE = Path(__file__).resolve().parent.parent / "g910_profiles.json"
+# XDG Base Directory spec: per-user runtime state (profiles/macros)
+# belongs under $XDG_DATA_HOME (default ~/.local/share), not next to
+# the installed source -- that only ever worked for a writable
+# git-clone checkout, and breaks outright for a real /usr-installed
+# package (not user-writable, by design). Created on first use.
+DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "g910-control"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _find_device():
+    """Ask keyledsctl itself which hidraw path is the G910 (046d:c335),
+    instead of a hardcoded by-id symlink -- that symlink embeds this
+    exact physical unit's USB serial (096239583837 on this machine,
+    confirmed via `udevadm info` to be per-unit, not a fixed model
+    string), so it would never match a different person's G910. keyledsctl
+    is already a hard runtime dependency and its own `list` command
+    already resolves the correct interface (confirmed live: it reports
+    exactly one line for this device, matching the same hidraw node the
+    old hardcoded path pointed at -- no if00/if01 ambiguity to resolve
+    ourselves). Returns None (rather than raising) if not found, so the
+    app can still open with no keyboard attached -- same as today,
+    whichever call actually needs the device will fail at that point.
+    """
+    try:
+        out = subprocess.run(
+            ["keyledsctl", "list"], capture_output=True, text=True, check=True
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError) as err:
+        print(f"g910_backlight: keyledsctl list failed ({err})", file=sys.stderr)
+        return None
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].lower() == "046d:c335":
+            return parts[0]
+    print("g910_backlight: no Logitech G910 (046d:c335) found via keyledsctl list", file=sys.stderr)
+    return None
+
+
+DEVICE = _find_device()
+PROFILES_FILE = DATA_DIR / "g910_profiles.json"
 # Blocks a full lighting snapshot covers. "media" deliberately excluded
 # -- paused per the user's explicit instruction not to touch it, see
 # G910_SKELETON.md.
