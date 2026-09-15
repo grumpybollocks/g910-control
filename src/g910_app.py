@@ -53,9 +53,9 @@ MACROS_FILE = bl.DATA_DIR / "g910_macros.json"  # separate from the G510s's macr
 def _find_g910_event_device():
     """Match the G910's base HID interface by vendor/product ID
     (046d:c335) + physical interface number, not by-id's embedded
-    per-unit USB serial -- that serial (096239583837 on this machine,
-    confirmed via `udevadm info` to be per-unit, not a fixed model
-    string) would never match a different person's G910. Interface 0
+    per-unit USB serial -- confirmed via `udevadm info` that this
+    serial is per-unit, not a fixed model string, so it would never
+    match a different person's G910. Interface 0
     (phys ends "/input0") is confirmed empirically (this session, by
     listening on both interfaces while actually typing) to be the one
     that fires real keypress events; interface 1 fires nothing. Returns
