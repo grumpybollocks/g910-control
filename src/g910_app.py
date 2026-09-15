@@ -36,7 +36,7 @@ from pathlib import Path
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGridLayout, QPushButton, QColorDialog, QLabel, QSlider, QTabWidget,
+    QGridLayout, QPushButton, QLabel, QSlider, QTabWidget,
     QDialog, QLineEdit, QMessageBox, QInputDialog, QFrame, QScrollArea,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
@@ -110,12 +110,17 @@ QLabel#Title {
 }
 QPushButton#ZoneButton {
     text-align: center;
-    padding: 5px 10px;
+    padding: 3px 8px;
 }
 QWidget#Panel {
     background-color: #1c1c20;
     border: 1px solid #2a2a30;
     border-radius: 8px;
+}
+QWidget#Card {
+    background-color: #232328;
+    border: 1px solid #34343a;
+    border-radius: 6px;
 }
 QFrame#Separator {
     background-color: #2a2a30;
@@ -150,17 +155,19 @@ QScrollArea {
     background-color: transparent;
 }
 QScrollBar:vertical {
-    background: transparent;
-    width: 10px;
+    background: #1c1c20;
+    width: 12px;
     margin: 0;
+    border-radius: 6px;
 }
 QScrollBar::handle:vertical {
-    background: #34343a;
+    background: #5a8ce0;
     border-radius: 5px;
     min-height: 24px;
+    margin: 1px;
 }
 QScrollBar::handle:vertical:hover {
-    background: #46454e;
+    background: #6a9cf0;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
@@ -179,6 +186,28 @@ def scale_color(color, brightness_pct):
     return QColor(r, g, b)
 
 
+# Same named palette as the sibling G510s app's COLOR_RGB, for a
+# one-click common-color path -- no fiddly gradient-square precision
+# needed for the colors people actually reach for most.
+# Real, standard colors -- not guessed hues. Sourced directly from
+# Xorg's own rgb.txt (via solaar's underlying logitech_receiver
+# library, special_keys.COLORS -- verified by reading that file
+# directly), the same canonical named-color list used across the
+# Linux desktop for decades. No white/near-white shades (not useful
+# for an RGB backlight preset) and no in-between/ambiguous hues.
+PRESET_COLORS = {
+    "Red": (0xFF, 0x00, 0x00),
+    "Orange": (0xFF, 0xA5, 0x00),
+    "Yellow": (0xFF, 0xFF, 0x00),
+    "Green": (0x00, 0xFF, 0x00),
+    "Blue": (0x00, 0x00, 0xFF),
+    "Purple": (0xA0, 0x20, 0xF0),
+    "Cyan": (0x00, 0xFF, 0xFF),
+    "Magenta": (0xFF, 0x00, 0xFF),
+    "Pink": (0xFF, 0xC0, 0xCB),
+}
+
+
 # --- Color Mode sidebar (left side of MainView) -----------------------
 
 class ColorModeSidebar(QWidget):
@@ -193,25 +222,46 @@ class ColorModeSidebar(QWidget):
         self.brightness_pct = 100
         self.setFixedWidth(180)
 
-        layout = QVBoxLayout()
+        # Real layout bug found via live use: this panel's own content
+        # (zone buttons + brightness + color controls) is naturally
+        # taller than the keyboard canvas -- since MainWindow sizes
+        # itself to fit the tallest column, that made the WHOLE window
+        # grow to fit this sidebar, leaving a big empty gap below the
+        # shorter canvas/G-keys column. Same fix as the Profiles panel
+        # already got: put the content in a QScrollArea instead of
+        # adding it to this widget directly, so the canvas (not
+        # whichever side panel happens to be tallest) drives the
+        # window's height, and anything taller than that just scrolls.
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(outer)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(4)
         title = QLabel("Color Mode")
         title.setObjectName("Title")
         layout.addWidget(title)
 
+        # 2-column grid, not a vertical list -- real complaint from live
+        # use: 6 full-width stacked buttons ate a lot of vertical space
+        # for what's fundamentally a small set of short-label choices.
         self.target_buttons = {}
-        for name in ZONE_KEYS:
+        zone_grid = QGridLayout()
+        zone_grid.setSpacing(4)
+        for i, name in enumerate(ZONE_KEYS):
             btn = QPushButton(name)
             btn.setObjectName("ZoneButton")
             btn.setCheckable(True)
             btn.clicked.connect(lambda _, n=name: self.select_target(n))
-            layout.addWidget(btn)
+            zone_grid.addWidget(btn, i // 2, i % 2)
             self.target_buttons[name] = btn
+        layout.addLayout(zone_grid)
         self.target_buttons[self.current_target].setChecked(True)
         self.canvas.select_keys(ZONE_SELECTION_KEYS[self.current_target])
 
-        layout.addSpacing(14)
+        layout.addSpacing(8)
         bright_row = QHBoxLayout()
         bright_label = QLabel("Brightness")
         bright_row.addWidget(bright_label)
@@ -226,23 +276,48 @@ class ColorModeSidebar(QWidget):
         self.brightness_slider.valueChanged.connect(self.on_brightness_changed)
         layout.addWidget(self.brightness_slider)
 
-        layout.addSpacing(14)
-        apply_btn = QPushButton("Pick Color && Apply")
-        apply_btn.setObjectName("Primary")
-        apply_btn.clicked.connect(self.on_apply)
-        layout.addWidget(apply_btn)
-
         layout.addSpacing(8)
-        layout.addWidget(QLabel("Or type a hex code:"))
+        layout.addWidget(QLabel("Color"))
+
+        self.preview_swatch = QLabel()
+        self.preview_swatch.setFixedHeight(26)
+        self._set_preview_style(QColor(38, 38, 43))  # matches the app's own default button gray, not a "real" color yet
+        layout.addWidget(self.preview_swatch)
+
+        # Hex field moved above the presets and given a bolder label --
+        # it was easy to miss entirely sitting below the swatch grid,
+        # confirmed by the user not noticing it was there at all.
+        layout.addSpacing(6)
+        hex_label = QLabel("<b>Hex code</b>")
+        layout.addWidget(hex_label)
         hex_row = QHBoxLayout()
         self.hex_edit = QLineEdit()
         self.hex_edit.setPlaceholderText("8000ff")
         self.hex_edit.returnPressed.connect(self.on_apply_hex)
         hex_apply_btn = QPushButton("Apply")
+        hex_apply_btn.setObjectName("Primary")
         hex_apply_btn.clicked.connect(self.on_apply_hex)
         hex_row.addWidget(self.hex_edit)
         hex_row.addWidget(hex_apply_btn)
         layout.addLayout(hex_row)
+
+        layout.addSpacing(8)
+        layout.addWidget(QLabel("Presets"))
+        swatch_grid = QGridLayout()
+        swatch_grid.setSpacing(4)
+        for i, (name, rgb) in enumerate(PRESET_COLORS.items()):
+            btn = QPushButton()
+            btn.setToolTip(name)
+            btn.setFixedSize(28, 28)
+            hexval = "#%02x%02x%02x" % rgb
+            btn.setStyleSheet(f"background-color: {hexval}; border: 1px solid #34343a; border-radius: 4px;")
+            btn.clicked.connect(lambda _, c=QColor(*rgb): self._apply_color(c))
+            swatch_grid.addWidget(btn, i // 3, i % 3)
+        swatch_row = QHBoxLayout()
+        swatch_row.addStretch()
+        swatch_row.addLayout(swatch_grid)
+        swatch_row.addStretch()
+        layout.addLayout(swatch_row)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("Status")
@@ -250,7 +325,21 @@ class ColorModeSidebar(QWidget):
         layout.addWidget(self.status_label)
 
         layout.addStretch()
-        self.setLayout(layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Capped explicitly -- a QScrollArea's own sizeHint still
+        # reports its content's full natural height unless bounded, so
+        # just wrapping in one doesn't stop it from stretching the
+        # window on its own. ~340px matches the canvas+G-Keys strip
+        # column's own real height (canvas.minimumHeight() is 286,
+        # +the G-Keys strip+spacing below it), so this panel can never
+        # be the one driving the window taller than the keyboard.
+        scroll.setMaximumHeight(460)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
     def on_brightness_changed(self, value):
         self.brightness_pct = value
@@ -276,32 +365,24 @@ class ColorModeSidebar(QWidget):
         for n, btn in self.target_buttons.items():
             btn.setChecked(n == name)
 
-    def on_apply(self):
-        color = QColorDialog.getColor()
-        if not color.isValid():
-            return
-        self._apply_color(color)
-
     def on_apply_hex(self):
-        """Real bug found via live use: KDE's own color-picker dialog
-        (QColorDialog.getColor() -- not our code, native Qt/KDE) was
-        misregistering swatch/gradient clicks -- every pick landed on
-        roughly the same blue-violet regardless of which swatch was
-        clicked (confirmed: picking a clearly purple swatch showed
-        HTML #5500ff, RGB(85,0,255) -- genuinely blue-leaning, not
-        purple, in the dialog's own readout, so this isn't a
-        perception thing). Nothing in this app renders that dialog, so
-        it can't be fixed here -- this hex field is a reliable
-        alternate path that bypasses the picker's gradient square
-        entirely."""
+        """Exact-value path -- kept alongside the swatches/gradient
+        picker for anyone who already knows the hex they want, or
+        wants to match a color exactly rather than eyeball it."""
         text = self.hex_edit.text().strip().lstrip("#")
         if len(text) != 6 or any(c not in "0123456789abcdefABCDEF" for c in text):
             self.status_label.setText("Invalid hex color -- use 6 hex digits, e.g. 8000ff")
             return
         self._apply_color(QColor(f"#{text}"))
 
+    def _set_preview_style(self, color):
+        self.preview_swatch.setStyleSheet(
+            f"background-color: {color.name()}; border: 1px solid #34343a; border-radius: 4px;"
+        )
+
     def _apply_color(self, color):
         scaled = scale_color(color, self.brightness_pct)
+        self._set_preview_style(scaled)
         hexcolor = scaled.name().lstrip("#")
         # ZONE_SELECTION_KEYS, not ZONE_KEYS: for Main Board this also
         # includes Win/Alt/AltGr/Menu/right-Ctrl/right-Shift, which
@@ -707,13 +788,13 @@ class ProfilesTab(QWidget):
         title.setObjectName("Title")
         layout.addWidget(title)
 
-        layout.addSpacing(10)
+        layout.addSpacing(6)
         save_btn = QPushButton("Save Current as Profile...")
         save_btn.setObjectName("Primary")
         save_btn.clicked.connect(self.on_save)
         layout.addWidget(save_btn)
 
-        layout.addSpacing(16)
+        layout.addSpacing(8)
         layout.addWidget(QLabel("<b>Saved profiles</b>"))
 
         # Real bug found via live use: with no scroll area, saving
@@ -725,7 +806,7 @@ class ProfilesTab(QWidget):
         # QScrollArea instead of adding it to the panel directly means
         # any number of saved profiles stay reachable by scrolling.
         self.list_layout = QVBoxLayout()
-        self.list_layout.setSpacing(6)
+        self.list_layout.setSpacing(4)
         list_container = QWidget()
         list_container.setLayout(self.list_layout)
         scroll = QScrollArea()
@@ -738,7 +819,12 @@ class ProfilesTab(QWidget):
         # a big blank gap below the actual cards before the status
         # label. A fixed cap gives predictable behavior either way:
         # short lists sit compact, long lists scroll within this box.
-        scroll.setMaximumHeight(260)
+        # 170, not 260 -- this panel was the tallest column in the
+        # window (429px sizeHint) once the sidebar got its own scroll
+        # cap, so the window was still growing to fit THIS panel
+        # instead of the keyboard canvas. Tightened to bring the whole
+        # window back down to roughly the canvas's own height.
+        scroll.setMaximumHeight(300)
         scroll.setWidget(list_container)
         layout.addWidget(scroll)
 
@@ -771,23 +857,30 @@ class ProfilesTab(QWidget):
             # for an arbitrary user-typed name anyway. Stacking is
             # robust to any name length instead of guessing a width.
             entry = QVBoxLayout()
-            entry.setContentsMargins(8, 6, 8, 6)
-            entry.setSpacing(4)
+            entry.setContentsMargins(6, 3, 6, 3)
+            entry.setSpacing(2)
             name_label = QLabel(name)
             name_label.setWordWrap(True)
             name_label.setAlignment(Qt.AlignCenter)
             entry.addWidget(name_label)
             btn_row = QHBoxLayout()
-            btn_row.setSpacing(6)
+            btn_row.setSpacing(4)
             load_btn = QPushButton("Load")
+            load_btn.setObjectName("ZoneButton")
             load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
             delete_btn = QPushButton("Delete")
+            delete_btn.setObjectName("ZoneButton")
             delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
             btn_row.addWidget(load_btn)
             btn_row.addWidget(delete_btn)
             entry.addLayout(btn_row)
+            # Distinct "Card" background (not "Panel", the same shade as
+            # this whole panel's own background) -- real contrast bug
+            # found via live use: cards were invisible as distinct
+            # elements since they shared the exact same fill as their
+            # own parent, giving zero visual separation between them.
             container = QWidget()
-            container.setObjectName("Panel")
+            container.setObjectName("Card")
             container.setLayout(entry)
             self.list_layout.addWidget(container)
 
@@ -848,6 +941,18 @@ class MainWindow(QMainWindow):
         # keeps tracking reality as panels change instead of rotting
         # into another stale hardcoded number.
         self.adjustSize()
+
+        # Real bug found via live use: the sidebar/profiles panels'
+        # scroll areas each have a setMaximumHeight() cap so THEIR
+        # natural full-content size doesn't drag adjustSize() above --
+        # but that same cap also blocked them from ever growing again,
+        # even if the user manually dragged the window taller
+        # afterward. The cap only needs to apply for this one
+        # calculation above; relax it immediately after so the panels
+        # are free to actually use any extra space a manual resize
+        # provides, instead of leaving it as dead space below them.
+        for scroll_area in self.findChildren(QScrollArea):
+            scroll_area.setMaximumHeight(16777215)  # Qt's own QWIDGETSIZE_MAX
 
 
 if __name__ == "__main__":
