@@ -719,3 +719,78 @@ alternative to the picker regardless.
 **Phase 1 status**: with these fixed, G910 is being treated as having
 reached its first complete, stable stage -- further features/polish
 come later, this is a deliberate stopping point, not "done forever."
+
+### Color picker rebuild + layout compaction pass (2026-09-15)
+
+Replaced the sidebar's "Pick Color & Apply" button (KDE's native
+`QColorDialog.getColor()`) with an in-app control: a live preview
+swatch, a hex-entry field, and a preset grid -- all going through one
+shared `_apply_color()` path. First iteration also included a custom
+click/drag Hue/Saturation gradient square (`HueSatPicker`); removed
+entirely by request in favor of presets + hex only, no gradient
+square.
+
+**Real preset-color research, not guessed**: checked solaar's own
+color picker (`palette.py`) -- it's a plain GTK color button with zero
+gamma/calibration logic, confirming there's no secret "hardware-
+compatible" correction technique in use by a comparable real app. Then
+found `logitech_receiver.special_keys.COLORS` (the library solaar is
+built on) ships a real curated palette sourced directly from Xorg's
+own `rgb.txt` -- swapped the sidebar's presets to that same list (Red/
+Orange/Yellow/Green/Blue/Purple/Cyan/Magenta/Pink), dropping White and
+the earlier guessed "Blue-Violet" hue.
+
+**Real bug, investigated before fixing anything**: a report that
+preset "Red" displayed as pink on the real keyboard turned out NOT to
+be a bug -- `bl.set_group_color()` called directly with pure
+`#ff0000` at full brightness was confirmed live as "deep red as
+expected." The likely cause was the brightness slider sitting below
+100% at the time of the original test (dimming can shift perceived
+hue on RGB LEDs) -- not a color-value or hardware-compatibility
+problem needing a fix.
+
+**Layout, several rounds of live feedback, each verified before
+moving to the next**:
+- Sidebar's own content (6 zone buttons + brightness + color
+  controls) was naturally taller than the keyboard canvas, so
+  `MainWindow`'s `adjustSize()` grew the WHOLE window to fit the
+  sidebar, leaving the canvas/G-Keys column with a big blank gap.
+  Fixed the same way the Profiles panel already was: wrapped the
+  sidebar's content in a capped `QScrollArea` so the canvas (not
+  whichever side panel happens to be tallest) drives the window's
+  height.
+- That in turn made the Profiles panel the tallest column instead --
+  tightened its own scroll cap to bring the window back down further.
+- **Real bug in the first version of both fixes**: the scroll areas'
+  `setMaximumHeight()` caps also blocked them from growing when the
+  user manually dragged the window taller afterward -- confirmed live
+  via a screenshot showing dead space below both panels after a
+  manual resize. Fixed by relaxing the cap back to Qt's own
+  `QWIDGETSIZE_MAX` immediately after `MainWindow`'s one-time
+  `adjustSize()` call, so the cap only shapes the initial size, not
+  ongoing resize behavior. Verified both synthetically (`win.resize()`
+  + checking each panel's actual `QScrollArea` grew by the full
+  delta) and live by the user actually dragging the window.
+- Zone target buttons switched from a 6-row vertical list to a
+  2-column grid -- real complaint that stacked full-width buttons for
+  a small set of short labels wasted a lot of vertical space.
+  Also tightened `QPushButton#ZoneButton` padding, and the hex field
+  moved above the presets with a bolder label (found via live use:
+  the user hadn't noticed it existed at all in its previous position
+  below the swatches).
+- Profile cards got their own distinct `QWidget#Card` background --
+  real contrast bug found via live use: cards previously shared the
+  exact same `QWidget#Panel` background as their own parent panel,
+  giving zero visual separation between adjacent cards. Load/Delete
+  buttons switched to the same compact `#ZoneButton` style as
+  everywhere else.
+
+Canvas itself also bumped ~18% bigger (`CELL_PX` 34->40,
+`GUTTER_PX` 4->5) by request, to better fill the vertical space
+freed up by the above compaction.
+
+All of the above compiled clean, smoke-tested, and verified against
+the real device (preset colors round-tripped through
+`get_key_color()` after the full layout churn, confirming nothing
+regressed functionally) before being called done, per the user's
+explicit "recheck yourself" at the end of this pass.
