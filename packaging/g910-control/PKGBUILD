@@ -1,0 +1,64 @@
+# Maintainer: grumpybollocks <coteanualex@gmail.com>
+pkgname=g910-control
+pkgver=1.2
+pkgrel=1
+pkgdesc="Per-key RGB backlight + G-key macro control for the Logitech G910 Orion Spectrum"
+arch=('any')
+url="https://github.com/grumpybollocks/bigblackclocks"
+license=('MIT')
+# namcap flags keyleds/ydotool as "may not be needed" -- false positive,
+# it can only see python imports/ELF linkage, not the subprocess.run()
+# calls to the `keyledsctl`/`ydotool` binaries this app genuinely
+# shells out to (confirmed via grep of the actual source + live testing
+# this session). Not removing them.
+depends=('python' 'keyleds' 'ydotool' 'python-pyqt5' 'python-evdev')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/grumpybollocks/bigblackclocks/archive/refs/tags/g910-v$pkgver.tar.gz")
+# The source repo is currently private while the app is being finished
+# -- the real sha256 can't be verified against a URL that can't be
+# fetched without credentials. SKIP is the standard, honest PKGBUILD
+# value for "not yet verifiable" (not a guessed/fabricated hash).
+# MUST be replaced with a real sha256sum (`updpkgsums`, or `sha256sum`
+# the downloaded tarball by hand) once the source repo is public --
+# required before any real AUR submission, `makepkg` won't skip it
+# unless SKIP is explicitly still there, which is a known checksum gap
+# to close, not something to leave in place.
+sha256sums=('SKIP')
+
+package() {
+  cd "$srcdir/bigblackclocks-g910-v$pkgver"
+
+  install -Dm755 src/g910_app.py "$pkgdir/usr/lib/$pkgname/g910_app.py"
+  install -Dm755 src/g910_canvas.py "$pkgdir/usr/lib/$pkgname/g910_canvas.py"
+  install -Dm755 src/g910_backlight.py "$pkgdir/usr/lib/$pkgname/g910_backlight.py"
+  install -Dm755 src/g910_macro_daemon.py "$pkgdir/usr/lib/$pkgname/g910_macro_daemon.py"
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/$pkgname" <<EOF
+#!/bin/sh
+exec /usr/bin/python3 /usr/lib/$pkgname/g910_app.py "\$@"
+EOF
+
+  # Reuses the exact same __PROJECT_DIR__ placeholder install-g910.sh
+  # substitutes for a git-clone install -- here it resolves to the
+  # package's own fixed /usr/lib location instead of a checkout path,
+  # since that's fixed at build time and never needs to be
+  # rediscovered at install time the way a git-clone install does.
+  # install -D (not a plain `sed >`) so it creates the parent
+  # /usr/lib/systemd/user/ directory itself -- a bare redirect
+  # doesn't, and fails outright on a clean $pkgdir (confirmed via a
+  # real local makepkg build before this fix).
+  # The checked-in template has __PROJECT_DIR__/src/... (matches
+  # install-g910.sh's git-clone layout, source under a src/
+  # subdirectory) -- this package installs the .py files flat under
+  # /usr/lib/g910-control/ instead (same style as solaar's own real
+  # /usr/lib/python3.*/site-packages/solaar/ layout), so the /src
+  # segment has to go too, not just the placeholder. Confirmed via a
+  # real local makepkg+install: substituting only __PROJECT_DIR__ left
+  # a dangling .../src/... path the service failed to start from.
+  install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/$pkgname.service" < \
+    <(sed "s|__PROJECT_DIR__/src|/usr/lib/$pkgname|g" services/g910-macro-daemon.service)
+
+  install -Dm644 packaging/g910-control/g910-control.desktop \
+    "$pkgdir/usr/share/applications/$pkgname.desktop"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
