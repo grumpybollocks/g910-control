@@ -27,7 +27,7 @@ depends=('python' 'keyleds' 'ydotool' 'python-pyqt5' 'python-evdev')
 # no credentials needed. Real sha256sum below, verified by actually
 # downloading this exact tag and hashing it (not guessed/copied).
 source=("$pkgname-$pkgver.tar.gz::https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v$pkgver.tar.gz")
-sha256sums=('cdb91922f31b32020639248023b61fb83b4116f64e260b0881c4bd6aad3ebb5e')
+sha256sums=('f8049bb081b459e4e9379147a1921164ce07f57811aad1827ab7672593f610d4')
 
 package() {
   cd "$srcdir/g910-control-g910-v$pkgver"

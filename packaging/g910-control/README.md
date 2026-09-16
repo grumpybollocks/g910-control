@@ -8,9 +8,16 @@ against `solaar`'s own real installed layout -- see `PORTABILITY.md`).
 
 ## Status
 
-Built and verified locally. **Not yet submitted to the AUR** -- that's
-a separate, explicit step, and the source repo needs to be public
-first (see below).
+Built and verified against a real, public source: the source repo has
+been split out to a standalone public repo,
+[grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control)
+(G910-only history, `git-filter-repo`'d out of this combined, private
+repo -- personal identifiers scrubbed from authorship and commit
+messages, verified against a fresh clone of the real pushed remote,
+not just the local working copy). This combined repo stays private and
+untouched; `g910-control` is where the PKGBUILD's `source=` now
+actually points. **Not yet submitted to the AUR itself** -- that's
+still a separate, explicit step (see below).
 
 ## Dependencies
 
@@ -36,21 +43,19 @@ confirmed directly rather than assumed:
 - `/usr/share/applications/g910-control.desktop`
 - `/usr/share/licenses/g910-control/LICENSE`
 
-## Known gap: sha256sums
+## sha256sums: resolved
 
-`sha256sums=('SKIP')` right now. The source repo is currently private
-while the app is being finished, so the release tarball can't be
-fetched to hash it for real -- `SKIP` is the honest, standard PKGBUILD
-value for "not yet verifiable," not a guessed/fake hash. **Must** be
-replaced with a real sum (`updpkgsums`, or `sha256sum` the tarball by
-hand) once the repo is public, before any real AUR submission.
+`sha256sums` is a real hash now, not `SKIP` -- computed by actually
+downloading the `g910-v1.4` tag archive from the now-public
+`grumpybollocks/g910-control` repo and hashing it directly
+(`sha256sum`), not copied or guessed.
 
 ## Local build + verification (what's actually been done)
 
-1. `makepkg` against a local source tarball built from a real `git
-   archive` of the `g910` branch at the `g910-v1.2` tag (not the
-   private GitHub URL directly, for the reason above) -- builds
-   clean.
+1. `makepkg` against the real public URL
+   (`https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.4.tar.gz`)
+   -- downloads, hash-validates, and builds clean, no local-tarball
+   workaround needed anymore now that the source is genuinely public.
 2. `pacman -U` installed for real on this machine. Confirmed:
    - `g910-control` launches from `/usr/bin/` and opens correctly.
    - `bl.DATA_DIR`/`bl.DEVICE` resolve correctly from the packaged
@@ -66,14 +71,17 @@ hand) once the repo is public, before any real AUR submission.
    `python-pyqt5`); the `keyleds`/`ydotool` warnings are the false
    positive explained above, left as-is.
 4. Extracted the actual built `.pkg.tar.zst` and grepped every file
-   for personal identifiers (username, hostname, USB serial) -- found
-   and removed two comments in `g910_app.py`/`g910_backlight.py` that
-   named this machine's specific keyboard's USB serial number as an
-   example; re-verified clean after the fix.
+   for personal identifiers (username, hostname, USB serial) --
+   clean. The one hit found (`.BUILDINFO`'s `builddir`/`startdir`
+   fields) is normal `makepkg` build metadata recording *this test
+   build's own* local path -- it's never part of what's submitted to
+   the AUR (only the PKGBUILD source is), and anyone else building
+   this PKGBUILD gets their own `.BUILDINFO` with their own path, not
+   this one.
 
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
-- Make the source repo public (or point `source=` at whatever new
-  repo replaces it) and compute a real `sha256sum`.
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
 - Push to a dedicated `aur.archlinux.org` git remote for this package.
+- Everything else (public source, real sha256sum, clean built-package
+  audit) is done.
