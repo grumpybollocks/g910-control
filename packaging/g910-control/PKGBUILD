@@ -1,17 +1,31 @@
 # Maintainer: grumpybollocks
 pkgname=g910-control
-pkgver=1.3
+pkgver=1.4
 pkgrel=1
 pkgdesc="Per-key RGB backlight + G-key macro control for the Logitech G910 Orion Spectrum"
 arch=('any')
 url="https://github.com/grumpybollocks/g910-control"
 license=('MIT')
+# pacman never starts --user services or reloads udev rules itself
+# during a transaction -- without this, a fresh install leaves
+# ydotool.service and g910-control.service both un-enabled (macro
+# playback silently doesn't work) and, if keyleds was just pulled in
+# as a fresh dependency, its udev rule may not have applied to an
+# already-plugged-in keyboard yet either. install-g910.sh (the
+# git-clone installer) already handles both; this makes the packaged
+# install match it instead of silently doing less.
+install=g910-control.install
 # namcap flags keyleds/ydotool as "may not be needed" -- false positive,
 # it can only see python imports/ELF linkage, not the subprocess.run()
 # calls to the `keyledsctl`/`ydotool` binaries this app genuinely
 # shells out to (confirmed via grep of the actual source + live testing
 # this session). Not removing them.
 depends=('python' 'keyleds' 'ydotool' 'python-pyqt5' 'python-evdev')
+# g910-control is a standalone public repo (git-filter-repo'd out of the
+# combined, private bigblackclocks repo -- G910 history only, personal
+# identifiers scrubbed) so this source= is genuinely fetchable by anyone,
+# no credentials needed. Real sha256sum below, verified by actually
+# downloading this exact tag and hashing it (not guessed/copied).
 source=("$pkgname-$pkgver.tar.gz::https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v$pkgver.tar.gz")
 sha256sums=('cdb91922f31b32020639248023b61fb83b4116f64e260b0881c4bd6aad3ebb5e')
 
