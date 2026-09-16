@@ -1,18 +1,23 @@
 #!/bin/bash
 # Dependency install for the G910 Orion Spectrum project on a fresh
-# Manjaro/Arch install. Run this from inside the project folder:
+# Arch (or Arch-based: Manjaro, EndeavourOS, etc.) install. Run this
+# from inside the project folder:
 #   ./install-g910.sh
 #
 # This ONLY installs dependencies -- it does not touch the keyboard or
 # write any udev rules itself (the keyleds AUR package ships its own
-# uaccess-based udev rule, confirmed working, see G910_README.txt).
+# uaccess-based udev rule, confirmed working, see G910_README.md).
 # Safe to re-run any time -- pacman/yay --needed just skips what's
 # already installed.
-#
-# This is a separate script from install.sh (that one is the sibling
-# G510s LCD project's setup, different hardware, different deps -- see
-# README.txt vs G910_README.txt).
 set -e
+
+if ! command -v pacman &>/dev/null; then
+    echo "pacman not found -- this script is Arch-specific (pacman is" >&2
+    echo "Arch's package manager). This app can still be installed" >&2
+    echo "manually elsewhere, but this script won't help you there." >&2
+    exit 1
+fi
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
@@ -53,20 +58,25 @@ else
     echo "All official-repo dependencies already present."
 fi
 
-echo "=== 2/2: AUR package (keyleds -- needs yay) ==="
+echo "=== 2/2: AUR package (keyleds -- needs an AUR helper) ==="
 if pacman -Qi keyleds &>/dev/null; then
     echo "  [ok] keyleds"
 else
     echo "  [missing] keyleds"
-    if ! command -v yay &>/dev/null; then
-        echo "yay not found -- can't auto-install keyleds. Install an AUR helper"
-        echo "first (https://github.com/Jguer/yay -- or paru/whatever you prefer),"
+    if command -v yay &>/dev/null; then
+        AUR_HELPER=yay
+    elif command -v paru &>/dev/null; then
+        AUR_HELPER=paru
+    else
+        echo "No AUR helper found (checked for yay and paru) -- can't"
+        echo "auto-install keyleds. Install one first"
+        echo "(https://github.com/Jguer/yay or https://github.com/Morganamilo/paru),"
         echo "then re-run this script. Make sure the 'keyleds' package ends up"
         echo "installed -- NOT 'keyleds-git', that's the abandoned original"
-        echo "upstream. See G910_README.txt DECISIONS section for why."
+        echo "upstream. See G910_README.md's DECISIONS section for why."
         exit 1
     fi
-    yay -S --needed keyleds
+    "$AUR_HELPER" -S --needed keyleds
 fi
 
 echo
@@ -74,14 +84,30 @@ echo "=== ydotoold: enabling the replay daemon's own background service ==="
 systemctl --user enable --now ydotool.service
 
 echo
-echo "=== systemd --user service: g910-macro-daemon (G-key/M-key playback) ==="
+echo "=== systemd --user service: g910-control (G-key/M-key macro playback) ==="
+# Anyone who ran an older version of this script has the daemon
+# running under the old unit name (g910-macro-daemon.service) --
+# migrate cleanly instead of leaving a stale duplicate enabled
+# alongside the new one.
+if systemctl --user list-unit-files g910-macro-daemon.service &>/dev/null \
+   && [ -f ~/.config/systemd/user/g910-macro-daemon.service ]; then
+    echo "Migrating from the old g910-macro-daemon.service unit name..."
+    systemctl --user disable --now g910-macro-daemon.service 2>/dev/null || true
+    rm -f ~/.config/systemd/user/g910-macro-daemon.service
+fi
 mkdir -p ~/.config/systemd/user
 # Checked-in file has a __PROJECT_DIR__ placeholder instead of a real
 # path (same reasoning as the desktop launcher below) -- substitute it
 # here rather than committing any one checkout's location.
-sed "s|__PROJECT_DIR__|$DIR|g" services/g910-macro-daemon.service > ~/.config/systemd/user/g910-macro-daemon.service
+# Installed AS g910-control.service (not the source file's own name,
+# g910-macro-daemon.service) so both install methods -- this script
+# and the PKGBUILD -- produce the exact same running service name.
+# They used to differ, which meant docs/instructions had to know which
+# install method you'd used just to tell you the right systemctl
+# command -- fixed so there's only ever one name to know.
+sed "s|__PROJECT_DIR__|$DIR|g" services/g910-macro-daemon.service > ~/.config/systemd/user/g910-control.service
 systemctl --user daemon-reload
-systemctl --user enable --now g910-macro-daemon.service
+systemctl --user enable --now g910-control.service
 
 echo
 echo "=== Desktop launcher ==="
@@ -130,4 +156,4 @@ echo
 echo "Verify ydotool with: ydotool key 28:1 28:0   (should send an Enter"
 echo "keypress wherever your cursor currently has focus)"
 echo
-echo "Verify the macro daemon with: systemctl --user status g910-macro-daemon.service"
+echo "Verify the macro daemon with: systemctl --user status g910-control.service"
