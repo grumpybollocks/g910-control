@@ -1,8 +1,11 @@
 # G910 Orion Spectrum Control App -- Planning Notes
-Branch: g910-macros (started as an untouched copy of `main`, the G510s
-LCD app -- diverging from here). This file documents the G910 project
-specifically; README.txt in this same repo is the G510s LCD project's
-docs and describes different hardware -- don't conflate the two.
+
+This is the detailed development log/planning doc for this app --
+start with the top-level `README.md` in this repo if you just want to
+know what it does and how to install it. (This app was originally
+developed alongside a separate G510s LCD app in a different, combined
+repo -- that history predates this standalone repo and isn't part of
+it; nothing here depends on it.)
 
 PROJECT STATUS -- read this block first:
 
