@@ -9,13 +9,19 @@ scratch: real USB/HID traffic, not a guess at what "should" work.
 
 ## Status
 
-- **App**: stable, tagged `g910-v1.3`. Runs as your normal user, starts
-  itself at login, keeps working through reboots/replugs/kernel
-  updates.
+- **App**: stable, tagged [`g910-v1.4`](https://github.com/grumpybollocks/g910-control/releases/latest).
+  Runs as your normal user, starts itself at login, keeps working
+  through reboots/replugs/kernel updates.
+- **Download**: see [Releases](https://github.com/grumpybollocks/g910-control/releases)
+  for every tagged version and its notes.
 - **AUR**: packaged (`packaging/g910-control/`), builds and installs
   cleanly via `makepkg`/`pacman` against this repo's own real tag
-  archive — **not yet actually submitted to the AUR itself** (that's a
-  separate, explicit step).
+  archive with a verified `sha256sum` — **not yet actually submitted
+  to the AUR itself**. Not a readiness problem on this package's side:
+  the AUR closed new account registration mid-2026 after a large
+  supply-chain malware incident and hadn't reopened it as of this
+  writing. Build it locally from here in the meantime — see
+  [`INSTALL.md`](INSTALL.md).
 - This repo is G910-only, on purpose. If you're looking for the
   companion Logitech **G510s** app (LCD screen, backlight, macros) —
   different keyboard, different codebase, developed and released
@@ -43,21 +49,11 @@ was built on.
 
 ## Installing
 
-Two ways, both fully supported:
-
-1. **`./install-g910.sh`** — clones this repo, installs every
-   dependency, drops the systemd `--user` service and desktop launcher
-   in place. Good for following along with development, or if you'd
-   rather not go through pacman.
-2. **The real Arch package** (`packaging/g910-control/PKGBUILD`) —
-   `makepkg` against this repo's own tagged source, then `pacman -U`.
-   Installs to the standard fixed `/usr/...` locations (see that
-   folder's own `README.md` for the exact layout and what's been
-   verified).
-
-Either way, your saved Profiles/macros live under
-`~/.local/share/g910-control/`, independent of which install method
-you used or whether you later switch between them.
+Two fully-supported ways — a plain script installer, or the real Arch
+package — both covered step by step, including the two things that
+still need doing manually after a package install (enabling the
+background services, and a udev-rule replug), in
+**[`INSTALL.md`](INSTALL.md)**.
 
 ## How it talks to the keyboard
 
