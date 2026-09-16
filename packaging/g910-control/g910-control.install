@@ -1,0 +1,38 @@
+post_install() {
+  cat <<EOF
+
+==> g910-control installed. Two things still need doing manually --
+    pacman intentionally never starts services or replugs hardware for
+    you during a transaction:
+
+  1. Enable the background services (macro playback + ydotool's own
+     keystroke-injection daemon), as your own user, not root:
+
+       systemctl --user daemon-reload
+       systemctl --user enable --now ydotool.service
+       systemctl --user enable --now g910-control.service
+
+  2. If keyleds was *just* installed fresh as a dependency of this
+     package, its udev rule may not have applied to an already-plugged-in
+     keyboard yet. Replug the G910, or run:
+
+       sudo udevadm control --reload && sudo udevadm trigger
+
+  Verify with:
+    keyledsctl list                              (should show the G910)
+    ydotool key 28:1 28:0                         (sends an Enter keypress)
+    systemctl --user status g910-control.service  (should be active)
+
+EOF
+}
+
+post_upgrade() {
+  cat <<EOF
+
+==> g910-control upgraded. If the service file changed, pick it up with:
+
+    systemctl --user daemon-reload
+    systemctl --user restart g910-control.service
+
+EOF
+}
