@@ -109,6 +109,21 @@ stopping any running effect before a profile save/load) were all
 verified on real hardware *before* this tag was cut -- see that
 commit's message for the exact reproduction and fix.
 
+**v1.8** (effects preview bug fix, live Speed slider, Profiles now
+remember an active effect, plus the fresh-install/landing-page docs
+pass): real build against the live `g910-v1.8` URL, `namcap` clean,
+extracted-package audit clean. Every source change was verified on
+real hardware *before* this tag was cut, not after -- the preview
+bug fix, the Speed slider's live tick-timing at three different
+settings on the same running thread, and the full save-mid-effect/
+load-and-resume round trip, including a byte-for-byte hash check of
+this machine's real 8 saved profiles before and after every test to
+confirm none of them were touched by the format-migration shim -- see
+that commit's message for the exact numbers. The `git`/`sudo`
+prerequisite gap in `INSTALL.md`/`install-g910.sh` was checked
+against Arch's own real `base-devel` package group contents, not
+guessed.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).

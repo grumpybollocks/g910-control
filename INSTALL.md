@@ -4,6 +4,22 @@ Two supported ways to install. Both end up in the same place — your
 saved Profiles and macros always live under
 `~/.local/share/g910-control/`, independent of which one you used.
 
+## Before you start
+
+Both options below assume `git` and a working `sudo` are already on
+your system. If you installed Arch the normal way (`archinstall`),
+you already have both. If you did a from-scratch manual install and
+haven't set either up yet:
+
+- **`git` missing?** `pacman -S git` (as root, or with `sudo` if you
+  already have that part sorted).
+- **No `sudo` yet?** That's a real security-relevant step this
+  project isn't going to try to script for you — see the ArchWiki's
+  [Sudo](https://wiki.archlinux.org/title/Sudo) page.
+- **Don't want to install `git` at all?** See "No git? No problem"
+  under Option 1 below — every release is also a plain downloadable
+  archive.
+
 ## Option 1 — the script installer
 
 ```
@@ -11,6 +27,18 @@ git clone https://github.com/grumpybollocks/g910-control.git
 cd g910-control
 ./install-g910.sh
 ```
+
+**No git? No problem** — every tagged release is also a plain
+archive, no git required:
+
+```
+curl -LO https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.8.tar.gz
+tar xzf g910-v1.8.tar.gz
+cd g910-control-g910-v1.8
+./install-g910.sh
+```
+
+(Swap `g910-v1.8` for whatever the [latest release](https://github.com/grumpybollocks/g910-control/releases/latest) tag actually is.)
 
 This installs every dependency (checking what's already present
 first, rather than a silent black-box `pacman -S`), sets up the
