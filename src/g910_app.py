@@ -215,6 +215,71 @@ def scale_color(color, brightness_pct):
     return QColor(r, g, b)
 
 
+# --- Animated effects (Breathing / Colour Cycle / Rainbow Wave) -------
+
+class EffectThread(QThread):
+    """Runs one animated lighting effect in a loop until stopped, in
+    its own thread -- same reasoning as RecorderThread/the macro
+    daemon's replay(): real per-tick timing measured live on actual
+    hardware before this was written (a single-group set-leds call
+    ~20ms, a full per-key Main Board sweep ~32ms, Main Board's uniform
+    "all=" fill -- the only path that reaches the six individually-
+    unaddressable keys, so it's what Breathing/Colour Cycle use there
+    -- ~114ms). All comfortably fast enough for these effects' actual
+    tick intervals, but 114ms would visibly stall the rest of the GUI
+    every tick if run directly on a QTimer on the main thread instead.
+
+    apply_fn(hexcolor) -> (ok, err): how Breathing/Colour Cycle send a
+    single colour to the real target (reuses ColorModeSidebar's own
+    _apply_zone, so this never duplicates that per-target dispatch a
+    second way). Rainbow Wave doesn't use apply_fn at all -- it always
+    has its own per-key gradient, sent directly."""
+    tick_applied = pyqtSignal(dict)   # {key_name: "#rrggbb"} for the canvas preview
+    tick_failed = pyqtSignal(str)
+
+    def __init__(self, kind, apply_fn, ordered_keys, real_names, block, brightness_pct, base_rgb):
+        super().__init__()
+        self.kind = kind
+        self.apply_fn = apply_fn
+        self.ordered_keys = ordered_keys
+        self.real_names = real_names
+        self.block = block
+        self.brightness_pct = brightness_pct
+        self.base_rgb = base_rgb
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        phase = 0.0
+        while not self._stop:
+            if self.kind == "wave":
+                hexes = bl.rainbow_hexes(len(self.real_names), self.brightness_pct, phase)
+                ok, err = bl._run_set_leds(self.block, [f"{k}={h}" for k, h in zip(self.real_names, hexes)])
+                preview = {name: f"#{h}" for name, h in zip(self.ordered_keys, hexes)}
+                step, interval_ms = 0.015, 60
+            elif self.kind == "breathing":
+                hexcolor = bl.breathing_hex(self.base_rgb, phase, self.brightness_pct)
+                ok, err = self.apply_fn(hexcolor)
+                preview = {name: f"#{hexcolor}" for name in self.ordered_keys}
+                step, interval_ms = 0.012, 100
+            else:  # "cycle"
+                hexcolor = bl.cycle_hex(phase, self.brightness_pct)
+                ok, err = self.apply_fn(hexcolor)
+                preview = {name: f"#{hexcolor}" for name in self.ordered_keys}
+                step, interval_ms = 0.004, 100
+
+            if not ok:
+                self.tick_failed.emit(err or "unknown error")
+                break
+            self.tick_applied.emit(preview)
+            if self._stop:
+                break
+            self.msleep(interval_ms)
+            phase += step
+
+
 # --- Color Mode sidebar (left side of MainView) -----------------------
 
 class ColorModeSidebar(QWidget):
@@ -227,6 +292,7 @@ class ColorModeSidebar(QWidget):
         self.canvas = canvas
         self.current_target = "Logo"
         self.brightness_pct = 100
+        self.effect_thread = None
         # 180 used to clip real content -- confirmed directly (not
         # guessed): the hex-code row (QLineEdit + Apply button) and the
         # zone grid's "Nav Cluster"/"Main Board" row each need ~225-245px
@@ -340,6 +406,24 @@ class ColorModeSidebar(QWidget):
         rainbow_btn.clicked.connect(self.on_apply_rainbow)
         layout.addWidget(rainbow_btn)
 
+        layout.addSpacing(8)
+        layout.addWidget(QLabel("Effects (animated)"))
+        breathing_btn = QPushButton("Breathing")
+        breathing_btn.setToolTip("Pulses the hex code above, in and out, until Stopped")
+        breathing_btn.clicked.connect(lambda: self._start_effect("breathing"))
+        layout.addWidget(breathing_btn)
+        cycle_btn = QPushButton("Colour Cycle")
+        cycle_btn.setToolTip("The whole zone slowly rotates through every hue")
+        cycle_btn.clicked.connect(lambda: self._start_effect("cycle"))
+        layout.addWidget(cycle_btn)
+        wave_btn = QPushButton("Rainbow Wave")
+        wave_btn.setToolTip("Like Rainbow, but the gradient scrolls across the keys")
+        wave_btn.clicked.connect(lambda: self._start_effect("wave"))
+        layout.addWidget(wave_btn)
+        stop_effect_btn = QPushButton("Stop Effect")
+        stop_effect_btn.clicked.connect(self._stop_effect)
+        layout.addWidget(stop_effect_btn)
+
         self.status_label = QLabel("")
         self.status_label.setObjectName("Status")
         self.status_label.setWordWrap(True)
@@ -367,6 +451,7 @@ class ColorModeSidebar(QWidget):
         self.bright_value_label.setText(f"{value}%")
 
     def select_target(self, name):
+        self._stop_effect()  # switching zones while a different zone is animating would just be confusing
         self.current_target = name
         for n, btn in self.target_buttons.items():
             btn.setChecked(n == name)
@@ -402,6 +487,7 @@ class ColorModeSidebar(QWidget):
         )
 
     def _apply_color(self, color):
+        self._stop_effect()  # a static apply should win over a leftover animation, not fight it
         scaled = scale_color(color, self.brightness_pct)
         self._set_preview_style(scaled)
         hexcolor = scaled.name().lstrip("#")
@@ -452,6 +538,7 @@ class ColorModeSidebar(QWidget):
         Main Board's six individually-unaddressable keys, so unlike
         _apply_color there's nothing wrong with just leaving them out
         entirely rather than pretending they're part of the gradient."""
+        self._stop_effect()
         target = self.current_target
         block = self._TARGET_BLOCK[target]
         wanted = ZONE_KEYS[target]
@@ -470,6 +557,59 @@ class ColorModeSidebar(QWidget):
             self.status_label.setText(f"{target} set to a rainbow gradient ({len(ordered_keys)} keys, {self.brightness_pct}%)")
         else:
             self.status_label.setText(f"FAILED: {err}")
+
+    def _stop_effect(self):
+        """Stops whatever EffectThread is currently running, if any --
+        called both by the explicit Stop button and automatically
+        whenever a static apply (preset/hex/Rainbow) or a zone switch
+        happens, so a leftover animation can never keep overwriting
+        something the user just tried to set statically."""
+        if self.effect_thread is not None:
+            self.effect_thread.stop()
+            self.effect_thread.wait(2000)
+            self.effect_thread = None
+
+    def _start_effect(self, kind):
+        """Starts kind ("breathing"/"cycle"/"wave") on the currently
+        selected zone. Only one effect ever runs at a time -- starting
+        a new one (even the same kind again, e.g. after changing the
+        brightness slider) stops whatever was already running first."""
+        self._stop_effect()
+        target = self.current_target
+        block = self._TARGET_BLOCK[target]
+        wanted = ZONE_KEYS[target]
+        ordered_keys = [c.key_name for c in ALL_CELLS if c.key_name in wanted]
+        real_names = [bl._real_key_name(block, k) for k in ordered_keys]
+
+        # Breathing's base colour comes from whatever's in the hex
+        # field right now -- lets you breathe a colour you actually
+        # picked, not a hardcoded default. Invalid/empty hex falls
+        # back to white rather than refusing to start the effect.
+        text = self.hex_edit.text().strip().lstrip("#")
+        if len(text) == 6 and all(c in "0123456789abcdefABCDEF" for c in text):
+            base_rgb = tuple(int(text[i:i+2], 16) for i in (0, 2, 4))
+        else:
+            base_rgb = (255, 255, 255)
+
+        thread = EffectThread(
+            kind, lambda hexcolor: self._apply_zone(target, hexcolor),
+            ordered_keys, real_names, block, self.brightness_pct, base_rgb,
+        )
+        thread.tick_applied.connect(self._on_effect_tick)
+        thread.tick_failed.connect(self._on_effect_failed)
+        self.effect_thread = thread
+        thread.start()
+        names = {"breathing": "Breathing", "cycle": "Colour Cycle", "wave": "Rainbow Wave"}
+        self.status_label.setText(f"{target}: {names[kind]} running -- click Stop Effect to end it")
+
+    def _on_effect_tick(self, preview):
+        for name, hexstr in preview.items():
+            self.canvas._colors[name] = QColor(hexstr)
+        self.canvas.update()
+
+    def _on_effect_failed(self, err):
+        self.status_label.setText(f"Effect stopped: {err}")
+        self.effect_thread = None
 
 
 def _vseparator():
@@ -520,7 +660,7 @@ class MainView(QWidget):
         canvas_column.addLayout(gkeys_row)
         canvas_column.addStretch()
 
-        self.profiles_panel = ProfilesTab(self.canvas)
+        self.profiles_panel = ProfilesTab(self.canvas, sidebar)
         self.profiles_panel.setObjectName("Panel")
         self.profiles_panel.setFixedWidth(220)
 
@@ -837,9 +977,17 @@ class ProfilesTab(QWidget):
     confirmed after replay). Takes MainView's canvas so a
     successful Load can refresh the preview to match -- otherwise the
     canvas would keep showing whatever was there before the load."""
-    def __init__(self, canvas):
+    def __init__(self, canvas, sidebar):
         super().__init__()
         self.canvas = canvas
+        # Needed to stop any running EffectThread before a save/load --
+        # confirmed via a real concurrent test that keyledsctl get-leds
+        # genuinely fails ("invalid response from device") when it
+        # races against a concurrent set-leds write from an effect
+        # still running. Not an application bug to work around with
+        # retries -- a real HID++ protocol-level conflict from two
+        # processes hitting the same device at once.
+        self.sidebar = sidebar
         layout = QVBoxLayout()
         layout.setContentsMargins(14, 14, 14, 14)
 
@@ -954,6 +1102,11 @@ class ProfilesTab(QWidget):
             )
             if confirm != QMessageBox.Yes:
                 return
+        # A running effect keeps writing to the device -- confirmed
+        # live that a concurrent get-leds read genuinely fails
+        # ("invalid response from device") against that, not just a
+        # theoretical risk. Stop it first so the snapshot is real.
+        self.sidebar._stop_effect()
         success, err = bl.save_profile(name)
         if success:
             self.status_label.setText(f'Saved current lighting as "{name}".')
@@ -962,6 +1115,7 @@ class ProfilesTab(QWidget):
             self.status_label.setText(f"FAILED: {err}")
 
     def on_load(self, name):
+        self.sidebar._stop_effect()  # same device-contention reason as on_save
         success, err = bl.load_profile(name)
         if success:
             self.status_label.setText(f'Loaded "{name}".')
@@ -1012,6 +1166,16 @@ class MainWindow(QMainWindow):
         # provides, instead of leaving it as dead space below them.
         for scroll_area in self.findChildren(QScrollArea):
             scroll_area.setMaximumHeight(16777215)  # Qt's own QWIDGETSIZE_MAX
+
+    def closeEvent(self, event):
+        # A running EffectThread would otherwise be destroyed while
+        # still alive when this window closes -- Qt warns loudly about
+        # that at best, and it's a real dangling-thread/background-
+        # subprocess risk at worst. Stop it cleanly first.
+        sidebar = self.findChildren(ColorModeSidebar)
+        if sidebar:
+            sidebar[0]._stop_effect()
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":
