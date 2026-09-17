@@ -97,6 +97,18 @@ real main-board keys got real distinct colours) -- see that commit's
 message for the exact values. Not yet re-confirmed via a real
 `pacman -U` of v1.6 itself.
 
+**v1.7** (three animated effects, plus a real sidebar-width fix): real
+build against the live `g910-v1.7` URL, `namcap` clean, extracted-
+package audit clean, and a headless launch of the actual built
+package confirming an effect started with no keyboard fails through
+the same graceful `tick_failed` path a real mid-effect disconnect
+would use, not just at start time. The effects' own colour-changes-
+over-time behaviour, the effect-switching/thread-cleanup logic, and a
+real device-level read-vs-write conflict this surfaced (fixed by
+stopping any running effect before a profile save/load) were all
+verified on real hardware *before* this tag was cut -- see that
+commit's message for the exact reproduction and fix.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
