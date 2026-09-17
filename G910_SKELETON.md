@@ -1,6 +1,6 @@
 # G910 Backend + GUI Skeleton — Build Log
 
-Companion to `G910_README.txt` (the planning/research doc). That file
+Companion to `G910_README.md` (the planning/research doc). That file
 covers *why* every decision was made; this one covers what actually
 got built and tested once planning turned into code, on 2026-09-13.
 
@@ -196,10 +196,10 @@ Letters/digits are literal (`A`-`Z`, `0`-`9`). Everything else:
 - No multi-select / drag-select / quick-group buttons.
 - No M-key/MR color wiring (still inert placeholders in the GUI —
   the underlying `keyleds_mkeys_set`/`keyleds_mrkeys_set` ctypes calls
-  were proven working earlier, in `G910_README.txt`, just not wired
+  were proven working earlier, in `G910_README.md`, just not wired
   into this skeleton yet).
 - No macro daemon, no G-Keys tab, no systemd service.
 - No effects.
 
-See `G910_README.txt`'s NEXT STEPS section for the fuller roadmap this
+See `G910_README.md`'s NEXT STEPS section for the fuller roadmap this
 skeleton feeds into.
