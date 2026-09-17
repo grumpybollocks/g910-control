@@ -237,7 +237,19 @@ class EffectThread(QThread):
     tick_applied = pyqtSignal(dict)   # {key_name: "#rrggbb"} for the canvas preview
     tick_failed = pyqtSignal(str)
 
-    def __init__(self, kind, apply_fn, ordered_keys, real_names, block, brightness_pct, base_rgb):
+    # Base pacing at speed_pct=100, and a floor per kind so the Speed
+    # slider can never ask this thread to out-run what was actually
+    # measured on real hardware this session (Main Board's whole-block
+    # "all=" fill -- what Breathing/Cycle use there -- ~114ms; a full
+    # per-key sweep, what Wave uses -- ~32ms on Main Board's 62 keys).
+    # One conservative floor per kind, not a precise per-target one:
+    # smaller zones could safely go faster, but erring toward "never
+    # spams the device" is a better default than being precise about it.
+    _BASE_INTERVAL_MS = {"wave": 60, "breathing": 100, "cycle": 100}
+    _BASE_STEP = {"wave": 0.015, "breathing": 0.012, "cycle": 0.004}
+    _MIN_INTERVAL_MS = {"wave": 40, "breathing": 110, "cycle": 110}
+
+    def __init__(self, kind, apply_fn, ordered_keys, real_names, block, brightness_pct, base_rgb, speed_pct=100):
         super().__init__()
         self.kind = kind
         self.apply_fn = apply_fn
@@ -246,29 +258,42 @@ class EffectThread(QThread):
         self.block = block
         self.brightness_pct = brightness_pct
         self.base_rgb = base_rgb
+        self.speed_pct = speed_pct
         self._stop = False
 
     def stop(self):
         self._stop = True
 
+    def set_speed(self, pct):
+        # Plain attribute write, read fresh at the top of every loop
+        # iteration below -- no lock needed for a single int/float
+        # under the GIL, same as how stop() already works. Takes
+        # effect on the very next tick, which is what makes this
+        # "live" rather than needing a restart.
+        self.speed_pct = pct
+
     def run(self):
         phase = 0.0
         while not self._stop:
+            # Recomputed every tick from the current speed_pct, not
+            # cached -- a slider drag mid-effect changes pacing on the
+            # very next iteration.
+            scale = 100.0 / max(1, self.speed_pct)
+            interval_ms = max(self._MIN_INTERVAL_MS[self.kind], int(self._BASE_INTERVAL_MS[self.kind] * scale))
+            step = self._BASE_STEP[self.kind] / scale
+
             if self.kind == "wave":
                 hexes = bl.rainbow_hexes(len(self.real_names), self.brightness_pct, phase)
                 ok, err = bl._run_set_leds(self.block, [f"{k}={h}" for k, h in zip(self.real_names, hexes)])
                 preview = {name: f"#{h}" for name, h in zip(self.ordered_keys, hexes)}
-                step, interval_ms = 0.015, 60
             elif self.kind == "breathing":
                 hexcolor = bl.breathing_hex(self.base_rgb, phase, self.brightness_pct)
                 ok, err = self.apply_fn(hexcolor)
                 preview = {name: f"#{hexcolor}" for name in self.ordered_keys}
-                step, interval_ms = 0.012, 100
             else:  # "cycle"
                 hexcolor = bl.cycle_hex(phase, self.brightness_pct)
                 ok, err = self.apply_fn(hexcolor)
                 preview = {name: f"#{hexcolor}" for name in self.ordered_keys}
-                step, interval_ms = 0.004, 100
 
             if not ok:
                 self.tick_failed.emit(err or "unknown error")
@@ -293,6 +318,7 @@ class ColorModeSidebar(QWidget):
         self.current_target = "Logo"
         self.brightness_pct = 100
         self.effect_thread = None
+        self.effect_speed_pct = 100
         # 180 used to clip real content -- confirmed directly (not
         # guessed): the hex-code row (QLineEdit + Apply button) and the
         # zone grid's "Nav Cluster"/"Main Board" row each need ~225-245px
@@ -408,6 +434,18 @@ class ColorModeSidebar(QWidget):
 
         layout.addSpacing(8)
         layout.addWidget(QLabel("Effects (animated)"))
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QLabel("Speed"))
+        self.speed_value_label = QLabel("100%")
+        speed_row.addStretch()
+        speed_row.addWidget(self.speed_value_label)
+        layout.addLayout(speed_row)
+        self.speed_slider = QSlider(Qt.Horizontal)
+        self.speed_slider.setRange(20, 300)
+        self.speed_slider.setValue(100)
+        self.speed_slider.setToolTip("Changes pace live if an effect is already running -- no need to restart it")
+        self.speed_slider.valueChanged.connect(self.on_speed_changed)
+        layout.addWidget(self.speed_slider)
         breathing_btn = QPushButton("Breathing")
         breathing_btn.setToolTip("Pulses the hex code above, in and out, until Stopped")
         breathing_btn.clicked.connect(lambda: self._start_effect("breathing"))
@@ -577,7 +615,19 @@ class ColorModeSidebar(QWidget):
         self._stop_effect()
         target = self.current_target
         block = self._TARGET_BLOCK[target]
-        wanted = ZONE_KEYS[target]
+        # Breathing/Cycle go through _apply_zone -> set_main_board_color,
+        # which DOES reach Main Board's six individually-unaddressable
+        # keys via its whole-block "all=" fill (same reasoning
+        # _apply_color's own comment already documents for the static
+        # case) -- so their preview should use ZONE_SELECTION_KEYS, same
+        # as the static apply. Wave sends real per-key directives
+        # directly and genuinely never reaches those six keys, so it
+        # keeps ZONE_KEYS. Using ZONE_KEYS for all three (the bug found
+        # from a real screenshot: those six keys visibly stuck at a
+        # stale colour during Colour Cycle while the rest of the board
+        # updated) was the preview silently under-covering what
+        # Breathing/Cycle's own real apply actually reaches.
+        wanted = ZONE_SELECTION_KEYS[target] if kind in ("breathing", "cycle") else ZONE_KEYS[target]
         ordered_keys = [c.key_name for c in ALL_CELLS if c.key_name in wanted]
         real_names = [bl._real_key_name(block, k) for k in ordered_keys]
 
@@ -594,6 +644,7 @@ class ColorModeSidebar(QWidget):
         thread = EffectThread(
             kind, lambda hexcolor: self._apply_zone(target, hexcolor),
             ordered_keys, real_names, block, self.brightness_pct, base_rgb,
+            speed_pct=self.effect_speed_pct,
         )
         thread.tick_applied.connect(self._on_effect_tick)
         thread.tick_failed.connect(self._on_effect_failed)
@@ -601,6 +652,14 @@ class ColorModeSidebar(QWidget):
         thread.start()
         names = {"breathing": "Breathing", "cycle": "Colour Cycle", "wave": "Rainbow Wave"}
         self.status_label.setText(f"{target}: {names[kind]} running -- click Stop Effect to end it")
+
+    def on_speed_changed(self, value):
+        self.effect_speed_pct = value
+        self.speed_value_label.setText(f"{value}%")
+        if self.effect_thread is not None:
+            # Live: no restart needed, EffectThread reads this fresh
+            # every tick.
+            self.effect_thread.set_speed(value)
 
     def _on_effect_tick(self, preview):
         for name, hexstr in preview.items():
@@ -1102,12 +1161,24 @@ class ProfilesTab(QWidget):
             )
             if confirm != QMessageBox.Yes:
                 return
+        # Capture what's running BEFORE stopping it -- stopping first
+        # would lose exactly the information being saved. speed_pct
+        # and (for breathing) the real base colour come straight off
+        # the live thread's own attributes, not re-derived from
+        # whatever the hex field/slider happen to show right now.
+        effect = None
+        thread = self.sidebar.effect_thread
+        if thread is not None:
+            effect = {"kind": thread.kind, "target": self.sidebar.current_target, "speed_pct": thread.speed_pct}
+            if thread.kind == "breathing":
+                effect["base_rgb"] = list(thread.base_rgb)
         # A running effect keeps writing to the device -- confirmed
         # live that a concurrent get-leds read genuinely fails
         # ("invalid response from device") against that, not just a
-        # theoretical risk. Stop it first so the snapshot is real.
+        # theoretical risk. Stop it AFTER capturing the above, so the
+        # snapshot itself is real.
         self.sidebar._stop_effect()
-        success, err = bl.save_profile(name)
+        success, err = bl.save_profile(name, effect=effect)
         if success:
             self.status_label.setText(f'Saved current lighting as "{name}".')
             self.refresh_list()
@@ -1116,12 +1187,30 @@ class ProfilesTab(QWidget):
 
     def on_load(self, name):
         self.sidebar._stop_effect()  # same device-contention reason as on_save
-        success, err = bl.load_profile(name)
-        if success:
-            self.status_label.setText(f'Loaded "{name}".')
-            self.canvas.sync_from_device()
-        else:
+        success, err, effect = bl.load_profile(name)
+        if not success:
             self.status_label.setText(f"FAILED: {err}")
+            return
+        self.canvas.sync_from_device()
+        if effect:
+            # Resume whatever was actually animating when this was
+            # saved, not just show the one frozen frame the static
+            # snapshot above already applied. select_target sets
+            # current_target (which _start_effect reads); for
+            # breathing, the real saved base colour goes into the hex
+            # field first since that's what _start_effect reads its
+            # base_rgb from -- same field, just populated from the
+            # profile instead of whatever a user happened to type.
+            self.sidebar.select_target(effect["target"])
+            if effect["kind"] == "breathing" and "base_rgb" in effect:
+                r, g, b = effect["base_rgb"]
+                self.sidebar.hex_edit.setText("%02x%02x%02x" % (r, g, b))
+            self.sidebar.speed_slider.setValue(effect.get("speed_pct", 100))
+            self.sidebar._start_effect(effect["kind"])
+            names = {"breathing": "Breathing", "cycle": "Colour Cycle", "wave": "Rainbow Wave"}
+            self.status_label.setText(f'Loaded "{name}" -- resuming {names[effect["kind"]]}.')
+        else:
+            self.status_label.setText(f'Loaded "{name}".')
 
     def on_delete(self, name):
         confirm = QMessageBox.question(self, "Delete profile?", f'Delete "{name}"?')
