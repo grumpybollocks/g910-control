@@ -1,0 +1,19 @@
+# Python bytecode cache -- machine/interpreter-specific, regenerated
+# automatically, never meant to be committed. Its absence here (no
+# .gitignore at all) is what let one slip into a real commit this
+# session -- caught and cleaned up, this file exists so it can't
+# happen again.
+__pycache__/
+*.pyc
+
+# Your own saved profiles/macros -- these live under
+# ~/.local/share/g910-control/ (XDG data dir), never in this checkout,
+# but ignored here too as a belt-and-braces safeguard against ever
+# accidentally committing real personal lighting/macro data.
+g910_profiles.json
+g910_macros.json
+
+# Local build artifacts from makepkg
+packaging/g910-control/*.pkg.tar.zst
+packaging/g910-control/src/
+packaging/g910-control/pkg/
