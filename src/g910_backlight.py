@@ -13,6 +13,7 @@ Solaar-derived layout geometry from planning) -- just enough to prove
 "set a named group of keys at once" works before investing in the real
 layout data.
 """
+import colorsys
 import ctypes
 import json
 import os
@@ -154,6 +155,48 @@ def _run_set_leds(block, directives):
     if result.returncode != 0:
         return False, result.stderr.strip() or f"exit code {result.returncode}"
     return True, None
+
+
+def rainbow_hexes(n, brightness_pct=100):
+    """n evenly-spaced hues around the colour wheel (full saturation,
+    value scaled by brightness_pct), in order -- one entry per key in
+    a gradient. The order here is just "hue 0, 1/n, 2/n, ..." -- it's
+    on the caller to supply key names in whatever order the gradient
+    should sweep across the keyboard (left-to-right/top-to-bottom),
+    since that ordering lives in the canvas's own cell geometry, not
+    in this module. brightness_pct is applied here (not left to the
+    caller to redo in QColor) so the hardware and any preview built
+    from calling this again with the same arguments can never drift
+    out of sync with each other."""
+    if n <= 0:
+        return []
+    factor = brightness_pct / 100.0
+    hexes = []
+    for i in range(n):
+        r, g, b = colorsys.hsv_to_rgb(i / n, 1.0, 1.0)
+        r = max(0, min(255, round(r * 255 * factor)))
+        g = max(0, min(255, round(g * 255 * factor)))
+        b = max(0, min(255, round(b * 255 * factor)))
+        hexes.append("%02x%02x%02x" % (r, g, b))
+    return hexes
+
+
+def set_keys_rainbow(block, real_key_names, brightness_pct=100):
+    """Applies a rainbow gradient across real_key_names (already real
+    keyledsctl names, already in the caller's intended visual order)
+    in one block, one keyledsctl call. Generic building block reused
+    for both the fixed GROUPS zones and Main Board -- unlike
+    set_main_board_color, this never needs the whole-block "all="
+    fill + restore dance: a rainbow has no single colour to give the
+    six individually-unaddressable keys anyway, so this only ever
+    touches keys that can actually take an individual colour, and
+    leaves the rest showing whatever they already had -- same as any
+    other per-key-only apply elsewhere in this module."""
+    if not real_key_names:
+        return False, "No keys to colour."
+    hexes = rainbow_hexes(len(real_key_names), brightness_pct)
+    directives = [f"{k}={h}" for k, h in zip(real_key_names, hexes)]
+    return _run_set_leds(block, directives)
 
 
 def _real_key_name(block, key_name):

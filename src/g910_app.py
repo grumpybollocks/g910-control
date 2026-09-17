@@ -45,7 +45,7 @@ import evdev
 from evdev import ecodes
 
 import g910_backlight as bl
-from g910_canvas import KeyboardCanvas, ZONE_KEYS, ZONE_SELECTION_KEYS, PRESET_COLORS
+from g910_canvas import KeyboardCanvas, ZONE_KEYS, ZONE_SELECTION_KEYS, PRESET_COLORS, ALL_CELLS
 
 MACROS_FILE = bl.DATA_DIR / "g910_macros.json"  # separate from the G510s's macros.json
 
@@ -326,6 +326,12 @@ class ColorModeSidebar(QWidget):
         swatch_row.addStretch()
         layout.addLayout(swatch_row)
 
+        layout.addSpacing(6)
+        rainbow_btn = QPushButton("Rainbow")
+        rainbow_btn.setToolTip("Sweep a rainbow gradient across the selected zone")
+        rainbow_btn.clicked.connect(self.on_apply_rainbow)
+        layout.addWidget(rainbow_btn)
+
         self.status_label = QLabel("")
         self.status_label.setObjectName("Status")
         self.status_label.setWordWrap(True)
@@ -421,6 +427,41 @@ class ColorModeSidebar(QWidget):
         if target == "Main Board":
             return bl.set_main_board_color(hexcolor)
         return False, f"Unknown target: {target}"
+
+    # Same block each target actually lives on, per _apply_zone above --
+    # reused here so the rainbow apply calls the right keyledsctl block
+    # without re-deriving it from the target name a second way.
+    _TARGET_BLOCK = {
+        "Logo": "logo", "G-Keys": "gkeys", "F1-F12": "keys",
+        "Numpad": "keys", "Nav Cluster": "keys", "Main Board": "keys",
+    }
+
+    def on_apply_rainbow(self):
+        """Sweeps a rainbow gradient across the selected zone's own
+        keys, in the same left-to-right/top-to-bottom order they're
+        declared in g910_canvas.ALL_CELLS -- ZONE_KEYS (not
+        ZONE_SELECTION_KEYS): a rainbow has no single colour to give
+        Main Board's six individually-unaddressable keys, so unlike
+        _apply_color there's nothing wrong with just leaving them out
+        entirely rather than pretending they're part of the gradient."""
+        target = self.current_target
+        block = self._TARGET_BLOCK[target]
+        wanted = ZONE_KEYS[target]
+        ordered_keys = [c.key_name for c in ALL_CELLS if c.key_name in wanted]
+        real_names = [bl._real_key_name(block, k) for k in ordered_keys]
+
+        ok, err = bl.set_keys_rainbow(block, real_names, brightness_pct=self.brightness_pct)
+        if ok:
+            # Calling rainbow_hexes() again with the identical
+            # arguments -- not re-deriving the scaling in QColor here
+            # -- guarantees the preview can never drift from what was
+            # actually just sent to the hardware.
+            hexes = bl.rainbow_hexes(len(ordered_keys), brightness_pct=self.brightness_pct)
+            preview = {name: QColor(f"#{h}") for name, h in zip(ordered_keys, hexes)}
+            self.canvas.set_colors_map(preview)
+            self.status_label.setText(f"{target} set to a rainbow gradient ({len(ordered_keys)} keys, {self.brightness_pct}%)")
+        else:
+            self.status_label.setText(f"FAILED: {err}")
 
 
 def _vseparator():
