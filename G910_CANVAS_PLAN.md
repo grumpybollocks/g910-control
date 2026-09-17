@@ -234,7 +234,7 @@ status file the GUI polls" pattern) but necessarily different at the
 input layer: G510s reads plain evdev keycodes directly (its G-keys are
 real Linux keycodes via `hid_lg_g15`); G910 has none -- decodes raw
 HID++ reports on `/dev/hidraw1` instead, using the exact protocol
-already reverse-engineered and documented in `G910_README.txt`.
+already reverse-engineered and documented in `G910_README.md`.
 
 **Verified before running anything, not assumed:**
 - `decode_report()` unit-tested against the EXACT real byte sequences
