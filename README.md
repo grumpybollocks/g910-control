@@ -17,7 +17,7 @@ Logitech never shipped Linux support for this keyboard. G HUB is Windows-only, a
 
 ## Status
 
-- **App**: stable, tagged [`g910-v1.4`](https://github.com/grumpybollocks/g910-control/releases/latest).
+- **App**: stable, tagged [`g910-v1.5`](https://github.com/grumpybollocks/g910-control/releases/latest).
 - **Download**: see [Releases](https://github.com/grumpybollocks/g910-control/releases)
   for every tagged version and its notes.
 - **AUR**: packaged (`packaging/g910-control/`), builds and installs
