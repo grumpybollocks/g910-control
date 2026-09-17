@@ -73,13 +73,15 @@ not carried over from an older version's testing):
    checkout -- with no keyboard simulated. Confirmed it constructs
    without crashing (this is exactly the bug v1.5 fixes).
 
-**NOT done for v1.5 yet -- needs the real keyboard, which only the
-user can do**: an actual `pacman -U` install and a live hardware
-round-trip (set a colour, read it back) through the packaged copy.
-Earlier tags (v1.2/v1.3) did get a real hardware round-trip before
-this round of fixes existed -- that confirmed the packaging *shape*
-works, not that today's exact v1.5 source does. Don't treat this
-README as claiming otherwise.
+**Now also done for v1.5 itself** (2026-09-17, after the user installed
+it): a real `pacman -U` upgrade on real hardware, confirmed the
+`post_upgrade()` hook printed correctly, `g910-control.service`
+restarted and reported `active`, and a live hardware round-trip
+through the actual installed package
+(`bl.set_group_color("function_row", "a020f0")` then
+`bl.get_key_color("F1")` -- returned `#a020f0` exactly) -- run against
+`/usr/lib/g910-control/`'s real installed files, not the source
+checkout.
 
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
