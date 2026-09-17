@@ -14,7 +14,7 @@ applying a color previews it there too, not just on the real hardware.
 Brightness: this keyboard's LED protocol has no separate hardware
 brightness call (block "keys"'s feature functions are just
 get/set-per-key-color, get/set-block-color, commit -- confirmed by
-reading feature_leds.c directly, see G910_README.txt). So brightness
+reading feature_leds.c directly, see G910_README.md). So brightness
 here means what it means for any RGB device without one: scale the
 chosen color's R/G/B by the brightness percentage before sending.
 
