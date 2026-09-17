@@ -376,6 +376,13 @@ class KeyboardCanvas(QWidget):
             self._colors[name] = qcolor
         self.update()
 
+    def set_colors_map(self, color_by_name):
+        """Like set_colors(), but a different QColor per key -- used
+        by the Rainbow preset, where every key in the zone gets its
+        own distinct hue instead of one shared color."""
+        self._colors.update(color_by_name)
+        self.update()
+
     def _compute_size(self):
         min_row = min(c.row for c in ALL_CELLS)
         min_col = min(c.col for c in ALL_CELLS)
