@@ -1,0 +1,17 @@
+pkgbase = g910-control
+	pkgdesc = Per-key RGB backlight + G-key macro control for the Logitech G910 Orion Spectrum
+	pkgver = 1.5
+	pkgrel = 1
+	url = https://github.com/grumpybollocks/g910-control
+	install = g910-control.install
+	arch = any
+	license = MIT
+	depends = python
+	depends = keyleds
+	depends = ydotool
+	depends = python-pyqt5
+	depends = python-evdev
+	source = g910-control-1.5.tar.gz::https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.5.tar.gz
+	sha256sums = c21dc5fd1321ca8bf13995258718ee8aad433713433ec11a9ddcfa59b849dbae
+
+pkgname = g910-control
