@@ -18,6 +18,20 @@ if ! command -v pacman &>/dev/null; then
     exit 1
 fi
 
+# On a from-scratch manual Arch install (as opposed to archinstall,
+# which sets this up for you), sudo often isn't configured for the
+# current user at all -- this script calls it below to install
+# packages, and a missing/unconfigured sudo would otherwise just fail
+# with a confusing permission error partway through. Configuring sudo
+# itself is a real security-relevant step this script won't try to
+# do for you.
+if ! command -v sudo &>/dev/null; then
+    echo "sudo not found. This script needs it to install packages." >&2
+    echo "See the ArchWiki's Sudo page to set it up:" >&2
+    echo "  https://wiki.archlinux.org/title/Sudo" >&2
+    exit 1
+fi
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
