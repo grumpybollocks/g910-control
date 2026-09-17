@@ -83,6 +83,20 @@ through the actual installed package
 `/usr/lib/g910-control/`'s real installed files, not the source
 checkout.
 
+**v1.6** (the Rainbow preset, same day): real build against the live
+`g910-v1.6` URL, `namcap` clean (same two known false positives),
+extracted-package personal-identifier audit clean, and a headless
+launch of the actual built package with no keyboard simulated --
+confirmed clicking Rainbow with no G910 attached fails gracefully
+instead of crashing. The gradient logic itself was verified on real
+hardware *before* packaging (backend directly: genuinely different
+colours per key, brightness scaling reaching the device exactly;
+full GUI path: preview colour matched hardware readback exactly;
+Main Board case: function-row keys correctly left untouched while
+real main-board keys got real distinct colours) -- see that commit's
+message for the exact values. Not yet re-confirmed via a real
+`pacman -U` of v1.6 itself.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
