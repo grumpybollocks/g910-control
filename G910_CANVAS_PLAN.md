@@ -375,7 +375,7 @@ Propagated the correction through the whole stack:
   at all" -- they kept `block="keys"` instead of `block=None`, and
   drag-selection now skips them via `individually_colorable` instead
   of the old `block is None` check.
-- `g910_app.py`: `ColorModeSidebar.on_apply()`'s canvas preview call
+- `g910_app.py`: `ColorModeSidebar._apply_color()`'s canvas preview call
   switched from `ZONE_KEYS` (strictly individually-addressable) to
   `ZONE_SELECTION_KEYS` (includes the six keys) so a Main Board apply
   visually updates them in the GUI too, matching the real keyboard.
