@@ -227,7 +227,15 @@ class ColorModeSidebar(QWidget):
         self.canvas = canvas
         self.current_target = "Logo"
         self.brightness_pct = 100
-        self.setFixedWidth(180)
+        # 180 used to clip real content -- confirmed directly (not
+        # guessed): the hex-code row (QLineEdit + Apply button) and the
+        # zone grid's "Nav Cluster"/"Main Board" row each need ~225-245px
+        # on their own, and the scroll area's own vertical scrollbar eats
+        # another 12px off whatever's left. 280 is the measured minimum
+        # content sizeHint (263) plus that scrollbar allowance, so
+        # nothing actually gets cut off regardless of which zone/button
+        # labels happen to be showing.
+        self.setFixedWidth(280)
 
         # Real layout bug found via live use: this panel's own content
         # (zone buttons + brightness + color controls) is naturally
