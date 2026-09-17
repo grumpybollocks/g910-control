@@ -5,7 +5,7 @@ G910 Backlight -- barebones skeleton, no GUI.
 Purpose: prove the core color-control primitives work reliably before
 building anything on top. Wraps `keyledsctl set-leds`/`get-leds`
 against LED block 01 ("keys", 105 keys, confirmed true per-key RGB on
-this exact hardware -- see G910_README.txt). Not wired to a daemon or
+this exact hardware -- see G910_README.md). Not wired to a daemon or
 GUI yet -- run directly for now, see the __main__ block at the bottom.
 
 Groups below are a minimal hardcoded starting point (not the full
@@ -71,7 +71,7 @@ PROFILE_BLOCKS = ("keys", "gkeys", "logo")
 # keyledsctl_gkeys.c, it only calls keyleds_gkeys_enable). They go
 # through libkeyleds.so directly via ctypes -- keyleds_mkeys_set/
 # keyleds_mrkeys_set, exported functions, proven working earlier this
-# project (see G910_README.txt M-KEY/MR INDICATOR LED CONTROL section).
+# project (see G910_README.md M-KEY/MR INDICATOR LED CONTROL section).
 _KEYLEDSCTL_APP_ID = 0x9
 _KEYLEDS_TARGET_DEFAULT = 0xff
 _MKEY_MASKS = {"M1": 0x01, "M2": 0x02, "M3": 0x04}
@@ -95,6 +95,8 @@ def set_mkey_led(profile_name):
     'M3'), turning the others off (the mask REPLACES, doesn't add --
     confirmed empirically earlier: setting M2 turned M1 off
     automatically)."""
+    if DEVICE is None:
+        return False, "No G910 keyboard found -- is it plugged in?"
     mask = _MKEY_MASKS.get(profile_name)
     if mask is None:
         return False, f"Unknown profile: {profile_name}"
@@ -109,6 +111,8 @@ def set_mkey_led(profile_name):
 
 
 def set_mrkey_led(on):
+    if DEVICE is None:
+        return False, "No G910 keyboard found -- is it plugged in?"
     lib = _keyleds_lib()
     device = lib.keyleds_open(DEVICE.encode(), _KEYLEDSCTL_APP_ID)
     if not device:
@@ -143,6 +147,8 @@ GROUPS = {
 
 def _run_set_leds(block, directives):
     """directives: list of 'KEY=hexcolor' strings, sent in one call."""
+    if DEVICE is None:
+        return False, "No G910 keyboard found -- is it plugged in?"
     cmd = ["keyledsctl", "set-leds", "-d", DEVICE, "-b", block] + directives
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -175,6 +181,8 @@ def _all_key_names(block="keys"):
     changes color even on a whole-keyboard write -- plus the one real,
     addressable zone). Sending the same key twice in one set-leds call
     is harmless but pointless."""
+    if DEVICE is None:
+        return []
     result = subprocess.run(
         ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
         capture_output=True, text=True,
@@ -245,6 +253,8 @@ def set_group_color(group_name, hex_color):
 
 
 def get_key_color(key_name, block="keys"):
+    if DEVICE is None:
+        return None
     real_name = _real_key_name(block, key_name)
     result = subprocess.run(
         ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
@@ -265,6 +275,8 @@ def _get_block_colors(block):
     """{real_key_name: hexcolor} for every key currently reported by
     the device in this block -- read-only, live query, same source as
     _all_key_names/get_key_color."""
+    if DEVICE is None:
+        return {}
     result = subprocess.run(
         ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
         capture_output=True, text=True,

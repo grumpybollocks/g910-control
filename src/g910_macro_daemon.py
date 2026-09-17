@@ -3,7 +3,7 @@
 Watches the G910's G1-G9/M1-M3/MR via raw HID++ reports on the
 keyboard's HID++ hidraw interface (DEVICE_PATH, see g910_backlight.py
 -- no evdev keycodes exist for these -- confirmed empirically, see
-G910_README.txt's G-KEY/M-KEY/MR PROTOCOL section) and replays recorded
+G910_README.md's G-KEY/M-KEY/MR PROTOCOL section) and replays recorded
 macros via ydotool. Mirrors the sibling G510s project's
 g510_macro_daemon.py (same replay mechanism, same macro file format,
 same M-key live-profile-switching behavior) -- adapted for the G910
