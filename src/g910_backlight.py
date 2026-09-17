@@ -410,16 +410,42 @@ def list_profiles():
     return list(load_profiles().keys())
 
 
-def save_profile(name):
+def _normalize_profile_entry(value):
+    """Handles both profile-file shapes: the original plain
+    {block: {key: color}} (pre-effects -- what every profile saved
+    before this feature existed still uses on disk, real user data
+    that must keep loading correctly) and the current
+    {"snapshot": {...same as above...}, "effect": {...} or None}.
+    Told apart by whether the value's own top-level keys are
+    "snapshot"/"effect" -- real PROFILE_BLOCKS names ("keys"/"gkeys"/
+    "logo") never collide with those two, so this is a real
+    distinction, not a guess. Returns (snapshot_dict,
+    effect_dict_or_None)."""
+    if "snapshot" in value or "effect" in value:
+        return value.get("snapshot", {}), value.get("effect")
+    return value, None
+
+
+def save_profile(name, effect=None):
     """Snapshots the CURRENT live color of every key across
     PROFILE_BLOCKS (keys/gkeys/logo -- media excluded, see
     PROFILE_BLOCKS comment) and stores it under `name`, overwriting any
-    existing profile with that name."""
+    existing profile with that name. `effect`, if given (a dict like
+    {"kind": "cycle", "target": "Main Board", "speed_pct": 100}), is
+    saved alongside the snapshot so loading this profile back can also
+    resume whatever animated effect was running when it was saved --
+    without this, only the one frozen colour that happened to be
+    showing at save time would ever come back. Always written in the
+    current {"snapshot": ..., "effect": ...} shape; an older profile
+    re-saved under the same name gets silently upgraded to this shape
+    too, same one-touch migration pattern already used elsewhere in
+    this codebase (e.g. the sensor-name alias migration) -- never a
+    batch rewrite of the whole file."""
     snapshot = {block: _get_block_colors(block) for block in PROFILE_BLOCKS}
     if not any(snapshot.values()):
         return False, "Couldn't read any key colors from the device."
     profiles = load_profiles()
-    profiles[name] = snapshot
+    profiles[name] = {"snapshot": snapshot, "effect": effect}
     PROFILES_FILE.write_text(json.dumps(profiles, indent=2))
     return True, None
 
@@ -444,11 +470,16 @@ def load_profile(name):
     reached. The per-key directives applied right after override the
     fill for every individually addressable key back to its exact
     saved color, so nothing else is approximated -- only the keys that
-    have no other option."""
+    have no other option. Returns (ok, err, effect) -- effect is
+    whatever was saved alongside this profile (or None, including for
+    every profile saved before this feature existed), so the caller
+    can decide whether to resume an animation on top of the static
+    snapshot this function already applies."""
     profiles = load_profiles()
-    snapshot = profiles.get(name)
-    if snapshot is None:
-        return False, f"No such profile: {name}"
+    entry = profiles.get(name)
+    if entry is None:
+        return False, f"No such profile: {name}", None
+    snapshot, effect = _normalize_profile_entry(entry)
 
     keys_colors = snapshot.get("keys")
     if keys_colors:
@@ -458,7 +489,7 @@ def load_profile(name):
             dominant = Counter(main_board_colors).most_common(1)[0][0]
             ok, err = _run_set_leds("keys", [f"all={dominant.lstrip('#')}"])
             if not ok:
-                return False, f"Failed pre-filling Main Board: {err}"
+                return False, f"Failed pre-filling Main Board: {err}", None
 
     for block, colors in snapshot.items():
         if not colors:
@@ -466,8 +497,8 @@ def load_profile(name):
         directives = [f"{key}={color}" for key, color in colors.items()]
         ok, err = _run_set_leds(block, directives)
         if not ok:
-            return False, f"Failed applying block '{block}': {err}"
-    return True, None
+            return False, f"Failed applying block '{block}': {err}", None
+    return True, None, effect
 
 
 def delete_profile(name):
