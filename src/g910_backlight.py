@@ -16,6 +16,7 @@ layout data.
 import colorsys
 import ctypes
 import json
+import math
 import os
 import subprocess
 import sys
@@ -157,23 +158,29 @@ def _run_set_leds(block, directives):
     return True, None
 
 
-def rainbow_hexes(n, brightness_pct=100):
+def rainbow_hexes(n, brightness_pct=100, phase=0.0):
     """n evenly-spaced hues around the colour wheel (full saturation,
     value scaled by brightness_pct), in order -- one entry per key in
-    a gradient. The order here is just "hue 0, 1/n, 2/n, ..." -- it's
-    on the caller to supply key names in whatever order the gradient
-    should sweep across the keyboard (left-to-right/top-to-bottom),
-    since that ordering lives in the canvas's own cell geometry, not
-    in this module. brightness_pct is applied here (not left to the
-    caller to redo in QColor) so the hardware and any preview built
-    from calling this again with the same arguments can never drift
-    out of sync with each other."""
+    a gradient. The order here is just "hue phase, phase+1/n, ..." --
+    it's on the caller to supply key names in whatever order the
+    gradient should sweep across the keyboard (left-to-right/top-to-
+    bottom), since that ordering lives in the canvas's own cell
+    geometry, not in this module. brightness_pct is applied here (not
+    left to the caller to redo in QColor) so the hardware and any
+    preview built from calling this again with the same arguments can
+    never drift out of sync with each other. phase (any float, wraps
+    via %1.0) rotates where hue 0 starts -- a one-shot call with
+    phase=0 is exactly the static Rainbow preset; calling this again
+    each animation tick with a slowly incrementing phase is what the
+    Rainbow Wave effect actually is -- same function, not a separate
+    implementation that could drift from the static version."""
     if n <= 0:
         return []
     factor = brightness_pct / 100.0
     hexes = []
     for i in range(n):
-        r, g, b = colorsys.hsv_to_rgb(i / n, 1.0, 1.0)
+        h = (i / n + phase) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(h, 1.0, 1.0)
         r = max(0, min(255, round(r * 255 * factor)))
         g = max(0, min(255, round(g * 255 * factor)))
         b = max(0, min(255, round(b * 255 * factor)))
@@ -181,7 +188,35 @@ def rainbow_hexes(n, brightness_pct=100):
     return hexes
 
 
-def set_keys_rainbow(block, real_key_names, brightness_pct=100):
+def breathing_hex(base_rgb, phase, brightness_pct=100):
+    """base_rgb breathing in and out -- phase 0..1 is one full cycle.
+    A sine-based curve (not a linear ramp) so the turnaround at each
+    end reads as a smooth breath rather than an abrupt reverse; never
+    fully off (floors at 10% of brightness_pct) since a fully black
+    keyboard mid-breath looks like the effect died, not like it's
+    breathing."""
+    factor = (brightness_pct / 100.0) * (0.1 + 0.9 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
+    r, g, b = base_rgb
+    r = max(0, min(255, round(r * factor)))
+    g = max(0, min(255, round(g * factor)))
+    b = max(0, min(255, round(b * factor)))
+    return "%02x%02x%02x" % (r, g, b)
+
+
+def cycle_hex(phase, brightness_pct=100):
+    """One hue for the WHOLE zone at once, rotating over time -- phase
+    0..1 is one full trip around the colour wheel. Same
+    hsv_to_rgb/brightness math as rainbow_hexes, just n=1 conceptually
+    (a single evolving colour, not a per-key gradient)."""
+    factor = brightness_pct / 100.0
+    r, g, b = colorsys.hsv_to_rgb(phase % 1.0, 1.0, 1.0)
+    r = max(0, min(255, round(r * 255 * factor)))
+    g = max(0, min(255, round(g * 255 * factor)))
+    b = max(0, min(255, round(b * 255 * factor)))
+    return "%02x%02x%02x" % (r, g, b)
+
+
+def set_keys_rainbow(block, real_key_names, brightness_pct=100, phase=0.0):
     """Applies a rainbow gradient across real_key_names (already real
     keyledsctl names, already in the caller's intended visual order)
     in one block, one keyledsctl call. Generic building block reused
@@ -191,10 +226,11 @@ def set_keys_rainbow(block, real_key_names, brightness_pct=100):
     six individually-unaddressable keys anyway, so this only ever
     touches keys that can actually take an individual colour, and
     leaves the rest showing whatever they already had -- same as any
-    other per-key-only apply elsewhere in this module."""
+    other per-key-only apply elsewhere in this module. phase forwards
+    straight to rainbow_hexes() -- see there for what it does."""
     if not real_key_names:
         return False, "No keys to colour."
-    hexes = rainbow_hexes(len(real_key_names), brightness_pct)
+    hexes = rainbow_hexes(len(real_key_names), brightness_pct, phase)
     directives = [f"{k}={h}" for k, h in zip(real_key_names, hexes)]
     return _run_set_leds(block, directives)
 
