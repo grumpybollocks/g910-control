@@ -4,7 +4,8 @@ A real Arch/pacman PKGBUILD for the G910 app, alongside the existing
 `install-g910.sh` git-clone install method (both are valid; this one
 follows the standard "package installs everything to fixed `/usr/...`
 locations, no per-user path discovery needed at all" pattern, verified
-against `solaar`'s own real installed layout -- see `PORTABILITY.md`).
+directly against `solaar`'s own real installed layout via
+`pacman -Ql solaar` on a machine that has it installed).
 
 ## Status
 
