@@ -10,6 +10,7 @@ Logitech never shipped Linux support for this keyboard. G HUB is Windows-only, a
 
 - **Every key, any colour.** Click a key on the on-screen keyboard to colour it directly, drag-select a whole area at once, or bulk-colour a named zone (Logo, G-Keys, F-row, Numpad, Nav Cluster, Main Board) from the sidebar in one click.
 - **A colour picker that doesn't fight you.** Named presets plus a hex field — no fiddly native colour-picker dialog getting in the way.
+- **A Rainbow preset**, one click. Sweeps a colour-wheel gradient across whichever zone you've selected, in the keys' real physical order.
 - **G-keys that actually do something.** Record and play back macros across three switchable M1/M2/M3 profiles, with M1/M2/M3/MR rendered as real clickable parts of the keyboard, not just labels bolted on the side.
 - **Save as many full lighting setups as you want**, and jump back to any of them instantly.
 - **Set it up once, forget it's there.** Runs as a lightweight systemd `--user` service — starts itself at login, survives reboots, replugs, and kernel updates without you touching it again.
@@ -17,7 +18,7 @@ Logitech never shipped Linux support for this keyboard. G HUB is Windows-only, a
 
 ## Status
 
-- **App**: stable, tagged [`g910-v1.5`](https://github.com/grumpybollocks/g910-control/releases/latest).
+- **App**: stable, tagged [`g910-v1.6`](https://github.com/grumpybollocks/g910-control/releases/latest).
 - **Download**: see [Releases](https://github.com/grumpybollocks/g910-control/releases)
   for every tagged version and its notes.
 - **AUR**: packaged (`packaging/g910-control/`), builds and installs
