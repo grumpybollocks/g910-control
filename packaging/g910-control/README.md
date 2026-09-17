@@ -9,16 +9,16 @@ directly against `solaar`'s own real installed layout via
 
 ## Status
 
-Built and verified against a real, public source: the source repo has
-been split out to a standalone public repo,
+Built and verified against a real, public source:
 [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control)
-(G910-only history, `git-filter-repo`'d out of this combined, private
-repo -- personal identifiers scrubbed from authorship and commit
-messages, verified against a fresh clone of the real pushed remote,
-not just the local working copy). This combined repo stays private and
-untouched; `g910-control` is where the PKGBUILD's `source=` now
-actually points. **Not yet submitted to the AUR itself** -- that's
-still a separate, explicit step (see below).
+(G910-only history, originally `git-filter-repo`'d out of a combined,
+private repo -- personal identifiers scrubbed from authorship and
+commit messages, verified against a fresh clone of the real pushed
+remote, not just the local working copy). As of 2026-09-17 that
+original combined repo has removed the G910 app from its `main`
+branch entirely -- this standalone repo is now the sole home for
+G910's source, not a mirror of it. **Not yet submitted to the AUR
+itself** -- that's still a separate, explicit step (see below).
 
 ## Dependencies
 
@@ -47,38 +47,39 @@ confirmed directly rather than assumed:
 ## sha256sums: resolved
 
 `sha256sums` is a real hash now, not `SKIP` -- computed by actually
-downloading the `g910-v1.4` tag archive from the now-public
+downloading the `g910-v1.5` tag archive from the now-public
 `grumpybollocks/g910-control` repo and hashing it directly
 (`sha256sum`), not copied or guessed.
 
 ## Local build + verification (what's actually been done)
 
+**For the current v1.5 tag, specifically** (real, done this pass --
+not carried over from an older version's testing):
+
 1. `makepkg` against the real public URL
-   (`https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.4.tar.gz`)
-   -- downloads, hash-validates, and builds clean, no local-tarball
-   workaround needed anymore now that the source is genuinely public.
-2. `pacman -U` installed for real on this machine. Confirmed:
-   - `g910-control` launches from `/usr/bin/` and opens correctly.
-   - `bl.DATA_DIR`/`bl.DEVICE` resolve correctly from the packaged
-     copy (`~/.local/share/g910-control/`, the real discovered
-     hidraw path) -- not hardcoded, not stale.
-   - Live hardware round-trip (set a color, read it back) matches
-     through the packaged files.
-   - `systemd-analyze verify` passes on the packaged service unit
-     after the `src/`-path bug above was found and fixed.
-3. `namcap` run against both the PKGBUILD and the built package --
-   one real, actionable finding fixed (`python` needed as an explicit
-   dependency, not just relying on it coming in transitively via
-   `python-pyqt5`); the `keyleds`/`ydotool` warnings are the false
-   positive explained above, left as-is.
-4. Extracted the actual built `.pkg.tar.zst` and grepped every file
-   for personal identifiers (username, hostname, USB serial) --
-   clean. The one hit found (`.BUILDINFO`'s `builddir`/`startdir`
-   fields) is normal `makepkg` build metadata recording *this test
-   build's own* local path -- it's never part of what's submitted to
-   the AUR (only the PKGBUILD source is), and anyone else building
-   this PKGBUILD gets their own `.BUILDINFO` with their own path, not
-   this one.
+   (`https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.5.tar.gz`)
+   -- downloads, hash-validates, and builds clean.
+2. `namcap` against both the PKGBUILD and the built package -- clean
+   except the two known false positives (`keyleds`/`ydotool` "may not
+   be needed" -- namcap can't see the `subprocess.run()` calls to
+   those binaries this app genuinely makes).
+3. Extracted the actual built `.pkg.tar.zst` and grepped every file
+   for personal identifiers -- clean (the one hit,
+   `.BUILDINFO`'s `builddir`/`startdir`, is normal `makepkg` metadata
+   about *this test build's own* local path, never part of what's
+   submitted to the AUR).
+4. A real headless PyQt5 launch (`QT_QPA_PLATFORM=offscreen`) of the
+   **actual extracted built package's files** -- not just the source
+   checkout -- with no keyboard simulated. Confirmed it constructs
+   without crashing (this is exactly the bug v1.5 fixes).
+
+**NOT done for v1.5 yet -- needs the real keyboard, which only the
+user can do**: an actual `pacman -U` install and a live hardware
+round-trip (set a colour, read it back) through the packaged copy.
+Earlier tags (v1.2/v1.3) did get a real hardware round-trip before
+this round of fixes existed -- that confirmed the packaging *shape*
+works, not that today's exact v1.5 source does. Don't treat this
+README as claiming otherwise.
 
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
