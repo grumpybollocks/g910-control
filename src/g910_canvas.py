@@ -18,7 +18,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
-from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont
+from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont, QPen
 from PyQt5.QtWidgets import (
     QWidget, QApplication, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLineEdit, QLabel,
@@ -449,9 +449,6 @@ class KeyboardCanvas(QWidget):
             painter.fillPath(path, fill)
             border = SELECTION_BORDER_COLOR if cell.key_name in self._selection else KEY_BORDER_COLOR
             pen_width = 2 if cell.key_name in self._selection else 1
-            painter.setPen(Qt.NoPen)
-            painter.strokePath(path, painter.pen())
-            from PyQt5.QtGui import QPen
             painter.setPen(QPen(border, pen_width))
             painter.drawPath(path)
 
