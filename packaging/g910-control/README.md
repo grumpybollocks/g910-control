@@ -166,6 +166,29 @@ character dropped when copying the hash into this PKGBUILD) before it
 shipped -- re-verified with a fresh `sha256sum` run, not by eye a
 second time.
 
+**v1.11** (Random colours rename, 6 more presets, Profiles panel
+height fix, G-Keys section separator): all four items came directly
+from live use immediately after installing v1.10. Rainbow renamed to
+"Random colours" (button/tooltip/status text) since v1.10 already
+made it randomize its starting hue per click, so the old name no
+longer matched what it does. `PRESET_COLORS` gained White, Gold,
+Teal, Indigo, Sky Blue, Lime (9 -> 15) -- the new Gold swatch applied
+to F1-F12 and read back via `get_key_color` exactly (`#ffd700`) on
+real hardware before shipping. `ProfilesTab`'s saved-profiles scroll
+area previously always claimed its full 300px cap regardless of
+content -- `setMaximumHeight` alone doesn't shrink a widgetResizable
+QScrollArea to a short child's real size, so `refresh_list()` now
+also calls `setFixedHeight(min(content_height, 300))` after rebuilding
+the list, computed from the real card count each time. The G-Keys
+strip under the canvas got a thin `HLine` separator above it and its
+label changed from "G-Keys" to "Add New Macro" so it reads as its own
+section instead of part of the keyboard image above it. Real build
+against the live `g910-v1.11` URL, `namcap` clean (same two known
+false positives), extracted-package personal-data audit clean,
+headless launch of the actual built package with no keyboard
+simulated. Hash copied via `sed` straight from a `sha256sum` variable
+this time, not retyped by eye, after the v1.10 transcription slip.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
