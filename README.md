@@ -3,7 +3,7 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3-blue.svg)
 ![Platform: Arch Linux](https://img.shields.io/badge/platform-Arch%20Linux-1793d1.svg)
-![G910: v1.13 stable](https://img.shields.io/badge/G910-v1.13%20stable-brightgreen.svg)
+![G910: v1.14 stable](https://img.shields.io/badge/G910-v1.14%20stable-brightgreen.svg)
 
 **Finally, real per-key RGB and macro control for the Logitech G910 Orion Spectrum on Linux — no Windows, no G HUB, no compromise.**
 
@@ -24,7 +24,7 @@ Logitech never shipped Linux support for this keyboard. G HUB is Windows-only, a
 
 ## Status
 
-- **App**: stable, tagged [`g910-v1.13`](https://github.com/grumpybollocks/g910-control/releases/latest).
+- **App**: stable, tagged [`g910-v1.14`](https://github.com/grumpybollocks/g910-control/releases/latest).
 - **Download**: see [Releases](https://github.com/grumpybollocks/g910-control/releases)
   for every tagged version and its notes.
 - **AUR**: packaged (`packaging/g910-control/`), builds and installs
