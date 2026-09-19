@@ -32,13 +32,13 @@ cd g910-control
 archive, no git required:
 
 ```
-curl -LO https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.12.tar.gz
-tar xzf g910-v1.12.tar.gz
-cd g910-control-g910-v1.12
+curl -LO https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.13.tar.gz
+tar xzf g910-v1.13.tar.gz
+cd g910-control-g910-v1.13
 ./install-g910.sh
 ```
 
-(Swap `g910-v1.12` for whatever the [latest release](https://github.com/grumpybollocks/g910-control/releases/latest) tag actually is.)
+(Swap `g910-v1.13` for whatever the [latest release](https://github.com/grumpybollocks/g910-control/releases/latest) tag actually is.)
 
 This installs every dependency (checking what's already present
 first, rather than a silent black-box `pacman -S`), sets up the
