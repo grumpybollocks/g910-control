@@ -460,8 +460,14 @@ class ColorModeSidebar(QWidget):
         layout.addLayout(swatch_row)
 
         layout.addSpacing(6)
-        rainbow_btn = QPushButton("Random colours")
-        rainbow_btn.setToolTip("A fresh random colour gradient across the selected zone, every click")
+        # Renamed with a (WIP) flag per direct feedback: this is a hue
+        # SWEEP with a randomized starting point, not truly independent
+        # per-key randomness -- on Main Board especially, keys in the
+        # same row sit next to each other in the gradient, so it reads
+        # as an ordered rainbow band, not a scattered random look. The
+        # name shouldn't promise more than the algorithm delivers.
+        rainbow_btn = QPushButton("Random Colours (WIP)")
+        rainbow_btn.setToolTip("A gradient sweep with a random starting hue, not fully independent per-key colours yet")
         rainbow_btn.clicked.connect(self.on_apply_rainbow)
         layout.addWidget(rainbow_btn)
         layout.addStretch()
@@ -1245,6 +1251,7 @@ class ProfilesTab(QWidget):
         names = bl.list_profiles()
         if not names:
             self.list_layout.addWidget(QLabel("No profiles saved yet."))
+            self.list_layout.addStretch()
             self.list_container.adjustSize()
             self.profiles_scroll.setFixedHeight(min(self.list_container.sizeHint().height(), 300))
             return
@@ -1271,15 +1278,23 @@ class ProfilesTab(QWidget):
             name_label.setAlignment(Qt.AlignCenter)
             name_label.setStyleSheet("font-size: 10px;")
             entry.addWidget(name_label)
+            # Compact padding via inline stylesheet, NOT a forced
+            # setFixedHeight -- real bug found via a live screenshot:
+            # an arbitrary fixed 16px was smaller than this font's own
+            # 24px line height, so "Load"/"Delete" rendered clipped/
+            # spilling past the button's own border. Letting Qt compute
+            # sizeHint from the real font metrics + this smaller
+            # padding is the only way to shrink a button without
+            # guessing wrong about how tall its text actually needs.
             btn_row = QHBoxLayout()
             btn_row.setSpacing(3)
             load_btn = QPushButton("Load")
             load_btn.setObjectName("ZoneButton")
-            load_btn.setFixedHeight(16)
+            load_btn.setStyleSheet("padding: 1px 8px;")
             load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
             delete_btn = QPushButton("Delete")
             delete_btn.setObjectName("ZoneButton")
-            delete_btn.setFixedHeight(16)
+            delete_btn.setStyleSheet("padding: 1px 8px;")
             delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
             btn_row.addWidget(load_btn)
             btn_row.addWidget(delete_btn)
@@ -1293,6 +1308,18 @@ class ProfilesTab(QWidget):
             container.setObjectName("Card")
             container.setLayout(entry)
             self.list_layout.addWidget(container)
+
+        # Real bug found via live use: with no trailing stretch and
+        # only 1-2 cards, Qt's box layout let the LAST card grow to
+        # fill whatever height the scroll viewport happened to have
+        # (Preferred size policy allows growth when nothing else claims
+        # the leftover space) -- a single profile ended up a ~90px-tall
+        # box with Load/Delete squeezed into the very bottom edge,
+        # despite the card's own sizeHint being ~30px. addStretch()
+        # gives that leftover space somewhere else to go, so every
+        # card always renders at its own natural size regardless of
+        # how much room the viewport has been given.
+        self.list_layout.addStretch()
 
         # Sized to the real content, capped at 300 -- computed AFTER
         # every card above is actually added, so it reflects the
