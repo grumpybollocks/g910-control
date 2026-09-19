@@ -235,6 +235,44 @@ def set_keys_rainbow(block, real_key_names, brightness_pct=100, phase=0.0):
     return _run_set_leds(block, directives)
 
 
+def set_main_board_rainbow(real_key_names, brightness_pct=100, phase=0.0):
+    """Rainbow gradient across Main Board's addressable keys, PLUS a
+    real colour for the six individually-unaddressable keys (Win/Alt/
+    AltGr/Menu/right-Ctrl/right-Shift) instead of leaving them
+    whatever they last were -- the actual bug the user kept hitting:
+    set_keys_rainbow alone just skips those six, so they sat there
+    visibly grey/stale while the rest of the board got a gradient.
+
+    Same whole-block-fill-then-restore dance set_main_board_color
+    uses (fill everything via "all=", including the six unreachable-
+    by-name keys, then in one more call restore F1-F12/Numpad/Nav
+    Cluster to what they had and lay the real per-key gradient on top
+    of the fill for Main Board's own addressable keys) -- except the
+    fill colour here is the gradient's own first hue rather than a
+    flat colour someone picked, since there's no single "the" colour
+    for a rainbow to give a key it can't individually address."""
+    if not real_key_names:
+        return False, "No keys to colour."
+    excluded = _excluded_from_main_board()
+    current = _get_block_colors("keys")
+    if not current:
+        return False, "Couldn't read the current key list from the device."
+    preserve = {k: v for k, v in current.items() if k in excluded}
+
+    hexes = rainbow_hexes(len(real_key_names), brightness_pct, phase)
+    ok, err = _run_set_leds("keys", [f"all={hexes[0]}"])
+    if not ok:
+        return False, err
+
+    directives = [f"{k}={h}" for k, h in zip(real_key_names, hexes)]
+    if preserve:
+        directives += [f"{k}={v.lstrip('#')}" for k, v in preserve.items()]
+    ok, err = _run_set_leds("keys", directives)
+    if not ok:
+        return False, f"Fill succeeded but per-key gradient/restore failed: {err}"
+    return True, None
+
+
 def _real_key_name(block, key_name):
     if block == "gkeys":
         return GKEY_NAMES.get(key_name, key_name)
