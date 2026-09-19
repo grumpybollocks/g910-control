@@ -1,6 +1,6 @@
 # Maintainer: grumpybollocks
 pkgname=g910-control
-pkgver=1.8
+pkgver=1.9
 pkgrel=1
 pkgdesc="Per-key RGB backlight + G-key macro control for the Logitech G910 Orion Spectrum"
 arch=('any')
@@ -27,7 +27,7 @@ depends=('python' 'keyleds' 'ydotool' 'python-pyqt5' 'python-evdev')
 # no credentials needed. Real sha256sum below, verified by actually
 # downloading this exact tag and hashing it (not guessed/copied).
 source=("$pkgname-$pkgver.tar.gz::https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v$pkgver.tar.gz")
-sha256sums=('d0788abb70e03d7efaffae380cf3329a4c5fc404b41aace80c56f8e92641e729')
+sha256sums=('7ee668316860ebf7ee870a8c8212ff5d1e4f26e5c670a0def36ebbd5aeed0c52')
 
 package() {
   cd "$srcdir/g910-control-g910-v$pkgver"
