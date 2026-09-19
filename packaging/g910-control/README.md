@@ -189,6 +189,27 @@ headless launch of the actual built package with no keyboard
 simulated. Hash copied via `sed` straight from a `sha256sum` variable
 this time, not retyped by eye, after the v1.10 transcription slip.
 
+**v1.12** (preset palette fix, compact colour picker row, shorter
+profile cards): three more items from live use right after v1.11.
+Gold and Sky Blue sat too close in hue to Yellow and Cyan to
+distinguish in a small swatch -- replaced with Brown and Silver
+(genuinely different value/saturation, not just another mid-brightness
+hue), and the grid is 5 columns instead of 3. The old layout had a
+separate full-width preview box above a separate "Hex code" row --
+now there's one compact row: a small swatch (updates live as you type
+or use the picker, no hardware call until Apply), the hex field, and
+Apply. A new "Colour Picker" button opens Qt's native `QColorDialog`
+and fills the hex field only -- confirmed it doesn't call `_apply_color`
+itself, Apply/Enter still does. Saved profile cards went from 61px to
+30px (measured via `sizeHint()` before/after, not eyeballed) by
+tightening margins/spacing to zero, fixing Load/Delete at 16px tall,
+and dropping the name label to a 10px font -- wordWrap left on so an
+unusually long profile name still wraps instead of getting clipped.
+Real build against the live `g910-v1.12` URL, `namcap` clean (same two
+known false positives), extracted-package personal-data audit clean,
+headless launch of the actual built package, hex-apply path
+(`on_apply_hex` -> `_apply_color`) tested live against real hardware.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
