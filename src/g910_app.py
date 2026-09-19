@@ -39,7 +39,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QPushButton, QLabel, QSlider, QTabWidget,
     QDialog, QLineEdit, QMessageBox, QInputDialog, QFrame, QScrollArea,
-    QColorDialog,
+    QColorDialog, QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor
@@ -1215,20 +1215,19 @@ class ProfilesTab(QWidget):
         self.profiles_scroll.setWidgetResizable(True)
         self.profiles_scroll.setFrameShape(QFrame.NoFrame)
         self.profiles_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # Capped, not stretched to fill the panel's full remaining
-        # height -- with a stretch factor and few profiles, the
-        # resizable container stretched to match the viewport, leaving
-        # a big blank gap below the actual cards before the status
-        # label. 300 is the ceiling for a long list (scrolls past
-        # that); refresh_list() below additionally sets a FIXED height
-        # each time based on the real card count, so a short list (1-2
-        # profiles) sits exactly as tall as its own cards instead of
-        # stretching to fill 300px regardless -- real complaint from
-        # live use: setMaximumHeight alone still let a resizable-widget
-        # scroll area claim the full 300px even with a single card in
-        # it, because QScrollArea's own sizeHint doesn't shrink to
-        # match a widgetResizable child's actual content height.
-        self.profiles_scroll.setMaximumHeight(300)
+        # A SIMPLE static cap, deliberately -- a previous attempt tried
+        # to compute this height dynamically from list_container's own
+        # sizeHint() every refresh (to shrink for a short list, cap for
+        # a long one), but that self-referential adjustSize()/sizeHint()
+        # call, re-run on top of whatever the PREVIOUS refresh had
+        # already set, compounded into worse and worse states as more
+        # profiles were added -- confirmed via a real screenshot after
+        # a second save: overlapping, garbled, near-unreadable cards.
+        # 160px (roughly 2-3 cards at their normal, unshrunk size) plus
+        # addStretch() below is simple, deterministic Qt with no
+        # feedback loop: few profiles sit compact with blank space
+        # below them (not stretched into), more than that scrolls.
+        self.profiles_scroll.setMaximumHeight(160)
         self.profiles_scroll.setWidget(self.list_container)
         layout.addWidget(self.profiles_scroll)
 
@@ -1252,8 +1251,6 @@ class ProfilesTab(QWidget):
         if not names:
             self.list_layout.addWidget(QLabel("No profiles saved yet."))
             self.list_layout.addStretch()
-            self.list_container.adjustSize()
-            self.profiles_scroll.setFixedHeight(min(self.list_container.sizeHint().height(), 300))
             return
         for name in names:
             # Stacked (name above Load/Delete), not side-by-side -- a
@@ -1263,38 +1260,29 @@ class ProfilesTab(QWidget):
             # panel, and a fixed width can never truly be "wide enough"
             # for an arbitrary user-typed name anyway. Stacking is
             # robust to any name length instead of guessing a width.
-            # Tightened margins/spacing + fixed-height buttons -- real
-            # complaint from live use: at the old 6/3/6/3 margins + a
-            # default-height Load/Delete row, each card measured 61px
-            # even for a one-word name, which added up fast with more
-            # than a couple of profiles saved. This cuts a card to
-            # ~28px (confirmed via sizeHint before/after this change),
-            # well over the "at least half as tall" ask.
+            # Deliberately plain/default sizing here (normal font,
+            # normal ZoneButton padding, no custom shrinking tricks) --
+            # two separate attempts at a smaller custom card (a forced
+            # setFixedHeight that clipped the button text, then a
+            # smaller font + padding combo that still produced garbled
+            # overlapping cards once a second profile existed) both
+            # made things worse. addStretch() below plus a modest
+            # static scroll cap handles "don't expand so much" without
+            # touching the card's own proven-safe internal sizing.
             entry = QVBoxLayout()
-            entry.setContentsMargins(6, 0, 6, 0)
-            entry.setSpacing(0)
+            entry.setContentsMargins(6, 3, 6, 3)
+            entry.setSpacing(2)
             name_label = QLabel(name)
             name_label.setWordWrap(True)
             name_label.setAlignment(Qt.AlignCenter)
-            name_label.setStyleSheet("font-size: 10px;")
             entry.addWidget(name_label)
-            # Compact padding via inline stylesheet, NOT a forced
-            # setFixedHeight -- real bug found via a live screenshot:
-            # an arbitrary fixed 16px was smaller than this font's own
-            # 24px line height, so "Load"/"Delete" rendered clipped/
-            # spilling past the button's own border. Letting Qt compute
-            # sizeHint from the real font metrics + this smaller
-            # padding is the only way to shrink a button without
-            # guessing wrong about how tall its text actually needs.
             btn_row = QHBoxLayout()
-            btn_row.setSpacing(3)
+            btn_row.setSpacing(4)
             load_btn = QPushButton("Load")
             load_btn.setObjectName("ZoneButton")
-            load_btn.setStyleSheet("padding: 1px 8px;")
             load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
             delete_btn = QPushButton("Delete")
             delete_btn.setObjectName("ZoneButton")
-            delete_btn.setStyleSheet("padding: 1px 8px;")
             delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
             btn_row.addWidget(load_btn)
             btn_row.addWidget(delete_btn)
@@ -1307,29 +1295,32 @@ class ProfilesTab(QWidget):
             container = QWidget()
             container.setObjectName("Card")
             container.setLayout(entry)
+            # Fixed vertical size policy -- the real root cause behind
+            # BOTH previous bugs (cards inflating to ~90px with few
+            # profiles, then cards compressing to ~36px/garbled with
+            # more than fit in the scroll cap): a default Preferred
+            # policy lets Qt grow OR shrink a widget away from its own
+            # sizeHint whenever the layout has slack either direction.
+            # Fixed means only the scroll AREA's viewport size changes;
+            # each card always renders at exactly its own sizeHint, and
+            # a real vertical scrollbar (default policy, never disabled
+            # above) takes over once more cards exist than the capped
+            # height can show -- confirmed via a 0/1/2/5/1-profile
+            # stress test before shipping this, not just a 1-profile
+            # check like the last two attempts.
+            container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             self.list_layout.addWidget(container)
 
-        # Real bug found via live use: with no trailing stretch and
-        # only 1-2 cards, Qt's box layout let the LAST card grow to
-        # fill whatever height the scroll viewport happened to have
-        # (Preferred size policy allows growth when nothing else claims
-        # the leftover space) -- a single profile ended up a ~90px-tall
-        # box with Load/Delete squeezed into the very bottom edge,
-        # despite the card's own sizeHint being ~30px. addStretch()
-        # gives that leftover space somewhere else to go, so every
-        # card always renders at its own natural size regardless of
-        # how much room the viewport has been given.
+        # Real bug found via live use: with no trailing stretch, Qt's
+        # box layout let the LAST card grow to fill whatever height the
+        # scroll viewport happened to have (Preferred size policy
+        # allows growth when nothing else claims the leftover space) --
+        # a single profile ended up a ~90px-tall box with Load/Delete
+        # squeezed into the very bottom edge, despite the card's own
+        # sizeHint being ~60px. addStretch() gives that leftover space
+        # somewhere else to go, so every card always renders at its own
+        # natural size regardless of how much room the viewport has.
         self.list_layout.addStretch()
-
-        # Sized to the real content, capped at 300 -- computed AFTER
-        # every card above is actually added, so it reflects the
-        # true count each time (1 profile sits compact, a long list
-        # still scrolls within the 300px ceiling). sizeHint() alone
-        # here (not adjustSize()/an event-loop-dependent call) because
-        # the layout above has already been populated synchronously.
-        self.list_container.adjustSize()
-        content_height = self.list_container.sizeHint().height()
-        self.profiles_scroll.setFixedHeight(min(content_height, 300))
 
     def on_save(self):
         name, ok = QInputDialog.getText(self, "Save Profile", "Profile name:")
