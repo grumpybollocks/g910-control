@@ -31,6 +31,7 @@ not a GUI profile selector).
 """
 import sys
 import json
+import random
 import select
 from pathlib import Path
 
@@ -131,6 +132,18 @@ QPushButton#Primary {
 QPushButton#Primary:hover {
     background-color: #4a7cd4;
     border-color: #6a9cf0;
+}
+QPushButton#Danger {
+    background-color: #c43a3a;
+    border-color: #e05a5a;
+    color: white;
+    text-align: center;
+    font-weight: 600;
+    padding: 9px 10px;
+}
+QPushButton#Danger:hover {
+    background-color: #d44a4a;
+    border-color: #f06a6a;
 }
 QLabel#Title {
     font-size: 15px;
@@ -344,12 +357,17 @@ class ColorModeSidebar(QWidget):
         self.setLayout(outer)
 
         content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(10, 10, 10, 10)
+        wrapper_layout = QVBoxLayout(content)
+        wrapper_layout.setContentsMargins(10, 10, 10, 10)
+        wrapper_layout.setSpacing(4)
+
+        self.tabs = QTabWidget()
+        wrapper_layout.addWidget(self.tabs)
+
+        color_tab = QWidget()
+        layout = QVBoxLayout(color_tab)
+        layout.setContentsMargins(6, 10, 6, 6)
         layout.setSpacing(4)
-        title = QLabel("Color Mode")
-        title.setObjectName("Title")
-        layout.addWidget(title)
 
         # 2-column grid, not a vertical list -- real complaint from live
         # use: 6 full-width stacked buttons ate a lot of vertical space
@@ -428,46 +446,74 @@ class ColorModeSidebar(QWidget):
 
         layout.addSpacing(6)
         rainbow_btn = QPushButton("Rainbow")
-        rainbow_btn.setToolTip("Sweep a rainbow gradient across the selected zone")
+        rainbow_btn.setToolTip("A fresh random rainbow gradient across the selected zone, every click")
         rainbow_btn.clicked.connect(self.on_apply_rainbow)
         layout.addWidget(rainbow_btn)
+        layout.addStretch()
 
-        layout.addSpacing(8)
-        layout.addWidget(QLabel("Effects (animated)"))
+        self.tabs.addTab(color_tab, "Color Mode")
+
+        # Effects (animated) split into its own tab, away from the
+        # Color Mode/Rainbow controls that just work -- real complaint
+        # from live use: Breathing/Colour Cycle/Rainbow Wave stacked
+        # directly under Rainbow made the whole sidebar look like one
+        # undifferentiated pile of buttons, and an effect left running
+        # was easy to lose track of. Marked WIP because the on-screen
+        # preview for Main Board's six individually-unaddressable keys
+        # can still drift from the real keyboard during an animation --
+        # unlike the one-shot Rainbow/preset applies, which are solid.
+        effects_tab = QWidget()
+        elayout = QVBoxLayout(effects_tab)
+        elayout.setContentsMargins(6, 10, 6, 6)
+        elayout.setSpacing(4)
+        wip_note = QLabel(
+            "Work in progress: animations run on the real keyboard, but "
+            "the on-screen preview for a few keys can lag behind it. "
+            "Switch zones or tabs to stop whatever's running."
+        )
+        wip_note.setObjectName("Status")
+        wip_note.setWordWrap(True)
+        elayout.addWidget(wip_note)
+        elayout.addSpacing(6)
+
         speed_row = QHBoxLayout()
         speed_row.addWidget(QLabel("Speed"))
         self.speed_value_label = QLabel("100%")
         speed_row.addStretch()
         speed_row.addWidget(self.speed_value_label)
-        layout.addLayout(speed_row)
+        elayout.addLayout(speed_row)
         self.speed_slider = QSlider(Qt.Horizontal)
         self.speed_slider.setRange(20, 300)
         self.speed_slider.setValue(100)
         self.speed_slider.setToolTip("Changes pace live if an effect is already running -- no need to restart it")
         self.speed_slider.valueChanged.connect(self.on_speed_changed)
-        layout.addWidget(self.speed_slider)
+        elayout.addWidget(self.speed_slider)
         breathing_btn = QPushButton("Breathing")
         breathing_btn.setToolTip("Pulses the hex code above, in and out, until Stopped")
         breathing_btn.clicked.connect(lambda: self._start_effect("breathing"))
-        layout.addWidget(breathing_btn)
+        elayout.addWidget(breathing_btn)
         cycle_btn = QPushButton("Colour Cycle")
         cycle_btn.setToolTip("The whole zone slowly rotates through every hue")
         cycle_btn.clicked.connect(lambda: self._start_effect("cycle"))
-        layout.addWidget(cycle_btn)
+        elayout.addWidget(cycle_btn)
         wave_btn = QPushButton("Rainbow Wave")
         wave_btn.setToolTip("Like Rainbow, but the gradient scrolls across the keys")
         wave_btn.clicked.connect(lambda: self._start_effect("wave"))
-        layout.addWidget(wave_btn)
-        stop_effect_btn = QPushButton("Stop Effect")
+        elayout.addWidget(wave_btn)
+        elayout.addSpacing(6)
+        stop_effect_btn = QPushButton("Stop Effects")
+        stop_effect_btn.setObjectName("Danger")
         stop_effect_btn.clicked.connect(self._stop_effect)
-        layout.addWidget(stop_effect_btn)
+        elayout.addWidget(stop_effect_btn)
+        elayout.addStretch()
+
+        self.tabs.addTab(effects_tab, "Effects (WIP)")
+        self.tabs.currentChanged.connect(lambda _: self._stop_effect())
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("Status")
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
-
-        layout.addStretch()
+        wrapper_layout.addWidget(self.status_label)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -571,28 +617,53 @@ class ColorModeSidebar(QWidget):
     def on_apply_rainbow(self):
         """Sweeps a rainbow gradient across the selected zone's own
         keys, in the same left-to-right/top-to-bottom order they're
-        declared in g910_canvas.ALL_CELLS -- ZONE_KEYS (not
-        ZONE_SELECTION_KEYS): a rainbow has no single colour to give
-        Main Board's six individually-unaddressable keys, so unlike
-        _apply_color there's nothing wrong with just leaving them out
-        entirely rather than pretending they're part of the gradient."""
+        declared in g910_canvas.ALL_CELLS. For Main Board specifically,
+        also gives the six individually-unaddressable keys (Win/Alt/
+        AltGr/Menu/right-Ctrl/right-Shift) the gradient's first hue via
+        set_main_board_rainbow's whole-block fill, instead of leaving
+        them at a stale colour -- previously this just skipped them
+        entirely, which is the "grey keys" bug reported repeatedly.
+
+        phase is randomised on every click (requested explicitly) so
+        repeat clicks give a genuinely different-looking sweep instead
+        of the identical fixed gradient each time -- same rainbow_hexes
+        math, just a different starting hue."""
         self._stop_effect()
         target = self.current_target
         block = self._TARGET_BLOCK[target]
         wanted = ZONE_KEYS[target]
         ordered_keys = [c.key_name for c in ALL_CELLS if c.key_name in wanted]
         real_names = [bl._real_key_name(block, k) for k in ordered_keys]
+        phase = random.random()
 
-        ok, err = bl.set_keys_rainbow(block, real_names, brightness_pct=self.brightness_pct)
+        if target == "Main Board":
+            ok, err = bl.set_main_board_rainbow(real_names, brightness_pct=self.brightness_pct, phase=phase)
+        else:
+            ok, err = bl.set_keys_rainbow(block, real_names, brightness_pct=self.brightness_pct, phase=phase)
+
         if ok:
             # Calling rainbow_hexes() again with the identical
-            # arguments -- not re-deriving the scaling in QColor here
-            # -- guarantees the preview can never drift from what was
-            # actually just sent to the hardware.
-            hexes = bl.rainbow_hexes(len(ordered_keys), brightness_pct=self.brightness_pct)
+            # arguments (including phase) -- not re-deriving the
+            # scaling in QColor here -- guarantees the preview can
+            # never drift from what was actually just sent to the
+            # hardware.
+            hexes = bl.rainbow_hexes(len(ordered_keys), brightness_pct=self.brightness_pct, phase=phase)
             preview = {name: QColor(f"#{h}") for name, h in zip(ordered_keys, hexes)}
+            fill_count = 0
+            if target == "Main Board" and hexes:
+                fill_color = QColor(f"#{hexes[0]}")
+                extra_keys = ZONE_SELECTION_KEYS[target] - wanted
+                for name in extra_keys:
+                    preview[name] = fill_color
+                fill_count = len(extra_keys)
             self.canvas.set_colors_map(preview)
-            self.status_label.setText(f"{target} set to a rainbow gradient ({len(ordered_keys)} keys, {self.brightness_pct}%)")
+            if fill_count:
+                self.status_label.setText(
+                    f"{target} set to a rainbow gradient ({len(ordered_keys)} keys + "
+                    f"{fill_count} whole-board-fill keys, {self.brightness_pct}%)"
+                )
+            else:
+                self.status_label.setText(f"{target} set to a rainbow gradient ({len(ordered_keys)} keys, {self.brightness_pct}%)")
         else:
             self.status_label.setText(f"FAILED: {err}")
 
