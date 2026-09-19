@@ -210,6 +210,29 @@ known false positives), extracted-package personal-data audit clean,
 headless launch of the actual built package, hex-apply path
 (`on_apply_hex` -> `_apply_color`) tested live against real hardware.
 
+**v1.13** (fix oversized profile card + clipped button text, rename
+Random Colours to WIP): two real bugs found from a live screenshot
+right after v1.12 shipped. `ProfilesTab.refresh_list()` had no trailing
+`addStretch()` in `list_layout` -- with a Preferred size policy and
+nothing else claiming leftover vertical space, Qt let the single/last
+card grow to fill whatever height the scroll viewport ended up with
+(confirmed via a full `MainWindow` + `processEvents()` repro, not just
+an isolated widget: card measured 86px actual vs. its own 30px
+sizeHint before the fix, 42px actual == 42px sizeHint after). Separately,
+the Load/Delete buttons' `setFixedHeight(16)` from v1.12 was smaller
+than this font's own 24px line height (`fontMetrics().height()`,
+checked directly rather than guessed again after the v1.10/v1.11 hash
+mistakes) -- clipped text, confirmed by the same screenshot. Replaced
+with reduced padding so Qt computes a safe height from real font
+metrics instead of another guessed constant. Random Colours renamed to
+"Random Colours (WIP)" per direct feedback: it's a hue-sweep gradient
+with a randomized starting phase, not independent per-key randomness,
+so keys in the same row on Main Board still read as an ordered band --
+the name shouldn't promise more than the algorithm delivers. Real
+build against the live `g910-v1.13` URL, `namcap` clean (same two
+known false positives), extracted-package personal-data audit clean,
+headless launch of the actual built package.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
