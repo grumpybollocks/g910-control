@@ -38,22 +38,29 @@ PADDING_PX = 10
 # for an RGB backlight preset) and no in-between/ambiguous hues.
 # Lives here (not g910_app.py) so both the sidebar and this module's
 # own PresetHexDialog share one copy instead of drifting independently.
+# Picked to sit at least ~25-30 degrees apart on the hue wheel (or, for
+# same-hue pairs like Teal/Cyan, far enough apart in value/saturation
+# to still read as clearly different colours) -- Gold and Sky Blue got
+# dropped from an earlier revision for sitting too close to Yellow and
+# Cyan respectively to tell apart at a glance in a small swatch;
+# Brown and Silver replace them as genuinely distinct neutrals/darks
+# instead of just adding another mid-brightness saturated hue.
 PRESET_COLORS = {
     "Red": (0xFF, 0x00, 0x00),
     "Orange": (0xFF, 0xA5, 0x00),
     "Yellow": (0xFF, 0xFF, 0x00),
     "Green": (0x00, 0xFF, 0x00),
-    "Blue": (0x00, 0x00, 0xFF),
-    "Purple": (0xA0, 0x20, 0xF0),
+    "Lime": (0x7C, 0xFC, 0x00),
+    "Teal": (0x00, 0x80, 0x80),
     "Cyan": (0x00, 0xFF, 0xFF),
+    "Blue": (0x00, 0x00, 0xFF),
+    "Indigo": (0x4B, 0x00, 0x82),
+    "Purple": (0xA0, 0x20, 0xF0),
     "Magenta": (0xFF, 0x00, 0xFF),
     "Pink": (0xFF, 0xC0, 0xCB),
+    "Brown": (0x8B, 0x45, 0x13),
     "White": (0xFF, 0xFF, 0xFF),
-    "Gold": (0xFF, 0xD7, 0x00),
-    "Teal": (0x00, 0x80, 0x80),
-    "Indigo": (0x4B, 0x00, 0x82),
-    "Sky Blue": (0x00, 0xBF, 0xFF),
-    "Lime": (0x7C, 0xFC, 0x00),
+    "Silver": (0xC0, 0xC0, 0xC0),
 }
 
 

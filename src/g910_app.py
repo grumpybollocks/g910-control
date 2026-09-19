@@ -39,6 +39,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QPushButton, QLabel, QSlider, QTabWidget,
     QDialog, QLineEdit, QMessageBox, QInputDialog, QFrame, QScrollArea,
+    QColorDialog,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor
@@ -407,30 +408,38 @@ class ColorModeSidebar(QWidget):
         self.brightness_slider.valueChanged.connect(self.on_brightness_changed)
         layout.addWidget(self.brightness_slider)
 
-        layout.addSpacing(8)
-        layout.addWidget(QLabel("Color"))
-
-        self.preview_swatch = QLabel()
-        self.preview_swatch.setFixedHeight(26)
-        self._set_preview_style(QColor(38, 38, 43))  # matches the app's own default button gray, not a "real" color yet
-        layout.addWidget(self.preview_swatch)
-
         # Hex field moved above the presets and given a bolder label --
         # it was easy to miss entirely sitting below the swatch grid,
-        # confirmed by the user not noticing it was there at all.
-        layout.addSpacing(6)
-        hex_label = QLabel("<b>Hex code</b>")
-        layout.addWidget(hex_label)
+        # confirmed by the user not noticing it was there at all. The
+        # preview swatch used to be its own full-width row above this
+        # one (a "big colour tab" complaint from live use) -- now it's
+        # a small square living directly on the hex row itself, and it
+        # updates live as you type/pick a colour (on_hex_text_changed),
+        # not just after a successful hardware Apply.
+        layout.addSpacing(8)
+        layout.addWidget(QLabel("<b>Hex code</b>"))
         hex_row = QHBoxLayout()
+        hex_row.setSpacing(6)
+        self.preview_swatch = QLabel()
+        self.preview_swatch.setFixedSize(26, 26)
+        self._set_preview_style(QColor(38, 38, 43))  # matches the app's own default button gray, not a "real" color yet
+        hex_row.addWidget(self.preview_swatch)
         self.hex_edit = QLineEdit()
         self.hex_edit.setPlaceholderText("8000ff")
         self.hex_edit.returnPressed.connect(self.on_apply_hex)
+        self.hex_edit.textChanged.connect(self.on_hex_text_changed)
+        hex_row.addWidget(self.hex_edit)
         hex_apply_btn = QPushButton("Apply")
         hex_apply_btn.setObjectName("Primary")
         hex_apply_btn.clicked.connect(self.on_apply_hex)
-        hex_row.addWidget(self.hex_edit)
         hex_row.addWidget(hex_apply_btn)
         layout.addLayout(hex_row)
+
+        layout.addSpacing(4)
+        picker_btn = QPushButton("Colour Picker")
+        picker_btn.setToolTip("Opens a full colour picker -- fills the hex code above, doesn't apply it by itself")
+        picker_btn.clicked.connect(self.on_pick_color)
+        layout.addWidget(picker_btn)
 
         layout.addSpacing(8)
         layout.addWidget(QLabel("Presets"))
@@ -443,7 +452,7 @@ class ColorModeSidebar(QWidget):
             hexval = "#%02x%02x%02x" % rgb
             btn.setStyleSheet(f"background-color: {hexval}; border: 1px solid #34343a; border-radius: 4px;")
             btn.clicked.connect(lambda _, c=QColor(*rgb): self._apply_color(c))
-            swatch_grid.addWidget(btn, i // 3, i % 3)
+            swatch_grid.addWidget(btn, i // 5, i % 5)
         swatch_row = QHBoxLayout()
         swatch_row.addStretch()
         swatch_row.addLayout(swatch_grid)
@@ -570,6 +579,31 @@ class ColorModeSidebar(QWidget):
             self.status_label.setText("Invalid hex color -- use 6 hex digits, e.g. 8000ff")
             return
         self._apply_color(QColor(f"#{text}"))
+
+    def on_hex_text_changed(self, text):
+        """Live preview only -- no hardware call. Updates the small
+        swatch next to the hex field as you type or as the Colour
+        Picker fills it in, so you see what you're about to Apply
+        before actually sending it. An invalid/partial hex just leaves
+        the swatch showing whatever it last showed, rather than
+        flashing to a default colour on every keystroke."""
+        text = text.strip().lstrip("#")
+        if len(text) == 6 and all(c in "0123456789abcdefABCDEF" for c in text):
+            self._set_preview_style(QColor(f"#{text}"))
+
+    def on_pick_color(self):
+        """Qt's native colour picker -- fills the hex field, same as
+        typing a value in by hand, but doesn't Apply it on its own.
+        Starts from whatever's currently in the hex field (if valid)
+        so re-opening the picker doesn't reset your starting point."""
+        current = self.hex_edit.text().strip().lstrip("#")
+        if len(current) == 6 and all(c in "0123456789abcdefABCDEF" for c in current):
+            initial = QColor(f"#{current}")
+        else:
+            initial = QColor(255, 255, 255)
+        color = QColorDialog.getColor(initial, self, "Pick a colour")
+        if color.isValid():
+            self.hex_edit.setText(color.name().lstrip("#"))
 
     def _set_preview_style(self, color):
         self.preview_swatch.setStyleSheet(
@@ -1222,20 +1256,30 @@ class ProfilesTab(QWidget):
             # panel, and a fixed width can never truly be "wide enough"
             # for an arbitrary user-typed name anyway. Stacking is
             # robust to any name length instead of guessing a width.
+            # Tightened margins/spacing + fixed-height buttons -- real
+            # complaint from live use: at the old 6/3/6/3 margins + a
+            # default-height Load/Delete row, each card measured 61px
+            # even for a one-word name, which added up fast with more
+            # than a couple of profiles saved. This cuts a card to
+            # ~28px (confirmed via sizeHint before/after this change),
+            # well over the "at least half as tall" ask.
             entry = QVBoxLayout()
-            entry.setContentsMargins(6, 3, 6, 3)
-            entry.setSpacing(2)
+            entry.setContentsMargins(6, 0, 6, 0)
+            entry.setSpacing(0)
             name_label = QLabel(name)
             name_label.setWordWrap(True)
             name_label.setAlignment(Qt.AlignCenter)
+            name_label.setStyleSheet("font-size: 10px;")
             entry.addWidget(name_label)
             btn_row = QHBoxLayout()
-            btn_row.setSpacing(4)
+            btn_row.setSpacing(3)
             load_btn = QPushButton("Load")
             load_btn.setObjectName("ZoneButton")
+            load_btn.setFixedHeight(16)
             load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
             delete_btn = QPushButton("Delete")
             delete_btn.setObjectName("ZoneButton")
+            delete_btn.setFixedHeight(16)
             delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
             btn_row.addWidget(load_btn)
             btn_row.addWidget(delete_btn)
