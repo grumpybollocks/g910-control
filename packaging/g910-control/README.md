@@ -124,6 +124,15 @@ prerequisite gap in `INSTALL.md`/`install-g910.sh` was checked
 against Arch's own real `base-devel` package group contents, not
 guessed.
 
+**v1.9** (canvas-click-stops-effect consistency fix): a self-audit
+found a real gap -- clicking a key directly on the keyboard image
+while an effect was running elsewhere on the same zone could have its
+colour silently overwritten by the effect's next tick, unlike every
+other static-apply path, which already stopped a running effect
+first. Confirmed with the user it was worth fixing rather than left
+as a self-correcting ~100ms flicker. Real build against the live
+`g910-v1.9` URL, `namcap` clean, extracted-package audit clean.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
