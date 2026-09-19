@@ -133,6 +133,39 @@ first. Confirmed with the user it was worth fixing rather than left
 as a self-correcting ~100ms flicker. Real build against the live
 `g910-v1.9` URL, `namcap` clean, extracted-package audit clean.
 
+**v1.10** (Main Board rainbow no longer leaves keys grey, Effects
+split into its own WIP tab, randomized rainbow phase): the static
+Rainbow preset previously only sent per-key gradient directives, which
+genuinely cannot address Win/Alt/AltGr/Menu/right-Ctrl/right-Shift --
+so on Main Board those six keys just sat there at whatever stale
+colour they already had, visibly grey against the rest of the
+gradient. New `set_main_board_rainbow()` does the same whole-block
+"all=" fill + F1-F12/Numpad/Nav-Cluster-restore dance `set_main_board_
+color()` already used for the static colour case, using the
+gradient's own first hue as the fill colour, so those six keys now get
+a real colour instead of being skipped. The `set_main_board_rainbow`
+calls themselves were run directly against the real device
+(`/dev/hidraw1`, both calls returned success) -- but `get-leds`
+genuinely can't read these six keys back by design (confirmed
+earlier), so that only proves the command was accepted, not that the
+LEDs visibly changed; final confirmation needs the user to actually
+look at the physical keyboard. Rainbow also now randomizes its
+starting hue (`phase`) on every click instead of the same fixed
+gradient each time, per direct request. Breathing/Colour Cycle/
+Rainbow Wave/Speed slider moved out of the Color Mode panel into a
+separate "Effects (WIP)" tab -- marked work-in-progress because the
+on-screen preview for a few keys can still lag the real keyboard
+during an animation, unlike the one-shot Rainbow/preset applies.
+Switching zones or tabs now stops any running effect automatically,
+and there's a dedicated Stop Effects button. Real build against the
+live `g910-v1.10` URL, `namcap` clean (same two known false
+positives), extracted-package personal-data audit clean, headless
+launch of the actual built package with no keyboard simulated. Also
+caught and fixed a real sha256 transcription error (one trailing hex
+character dropped when copying the hash into this PKGBUILD) before it
+shipped -- re-verified with a fresh `sha256sum` run, not by eye a
+second time.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
