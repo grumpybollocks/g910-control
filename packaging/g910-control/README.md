@@ -233,6 +233,30 @@ build against the live `g910-v1.13` URL, `namcap` clean (same two
 known false positives), extracted-package personal-data audit clean,
 headless launch of the actual built package.
 
+**v1.14** (fix the REAL root cause of profile card breakage, after two
+failed attempts): v1.12 and v1.13 both tried to shrink/stabilize
+`ProfilesTab`'s card height by recomputing `profiles_scroll`'s fixed
+height from `list_container.sizeHint()` on every `refresh_list()` call
+-- self-referential, since that computation ran on top of whatever the
+PREVIOUS refresh had already set. Confirmed via a real screenshot that
+adding a SECOND profile compounded this into garbled, overlapping,
+near-unreadable cards -- worse than the original "too tall" complaint
+this was meant to fix. Fully reverted: cards are back to plain default
+sizing (normal font, normal `ZoneButton` padding, no custom shrinking),
+`profiles_scroll` uses one static `setMaximumHeight(160)`, no
+per-refresh recomputation at all. The actual root cause of BOTH the
+original inflation bug (v1.12) and this new corruption (v1.13): Card
+widgets had no explicit vertical size policy, so Qt's default
+`Preferred` let them grow OR shrink away from their own `sizeHint()`
+whenever the layout had slack either direction. Every card now gets
+`QSizePolicy.Fixed` vertically -- confirmed via a 0/1/2/3/5/back-to-2
+profile stress test (not just a single-profile check like the previous
+two releases) against both the source and the actual built package,
+plus the 3 real profiles on this machine, all rendering at their
+correct natural height (64px) with zero compression or inflation.
+Real build against the live `g910-v1.14` URL, `namcap` clean (same two
+known false positives), extracted-package personal-data audit clean.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
