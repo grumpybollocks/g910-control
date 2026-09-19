@@ -306,6 +306,7 @@ MR_ACTIVE_COLOR = QColor(196, 70, 58)      # distinct warm color -- MR is a diff
 class KeyboardCanvas(QWidget):
     zone_clicked = pyqtSignal(str)  # emitted with a ZONE_KEYS name when a colorable key is clicked -- lets the sidebar follow along
     mkey_clicked = pyqtSignal(str)  # emitted with "M1"/"M2"/"M3"/"MR" when one of those cells is clicked
+    color_applied = pyqtSignal()   # emitted after a successful direct drag-select-and-pick apply -- lets the sidebar stop a running effect that would otherwise silently overwrite this on its next tick
 
     def __init__(self):
         super().__init__()
@@ -537,14 +538,24 @@ class KeyboardCanvas(QWidget):
             if cell.key_name in self._selection:
                 by_block.setdefault(cell.block, []).append(cell.key_name)
 
+        applied_any = False
         for block, keys in by_block.items():
             directives = [f"{bl._real_key_name(block, k)}={hexcolor}" for k in keys]
             ok, err = bl._run_set_leds(block, directives)
             if ok:
                 for k in keys:
                     self._colors[k] = color
+                applied_any = True
             else:
                 print(f"FAILED to set {keys} on block {block}: {err}")
+
+        if applied_any:
+            # A running effect would otherwise overwrite this on its
+            # very next tick with no explanation -- a static, direct
+            # apply should win, same principle already applied to
+            # every other static-apply path (presets, hex, Rainbow,
+            # zone switching, profile save/load).
+            self.color_applied.emit()
 
         if was_click:
             self._selection = set()

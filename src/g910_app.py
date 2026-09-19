@@ -732,6 +732,7 @@ class MainView(QWidget):
         self._mr_active = False
         self.canvas.zone_clicked.connect(sidebar.sync_target)
         self.canvas.mkey_clicked.connect(self.on_mkey_clicked)
+        self.canvas.color_applied.connect(sidebar._stop_effect)
 
     def on_mkey_clicked(self, name):
         if name == "MR":
