@@ -170,6 +170,12 @@ QFrame#Separator {
     max-width: 1px;
     min-width: 1px;
 }
+QFrame#HSeparator {
+    background-color: #2a2a30;
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}
 QLabel#Status {
     color: #9a9aa2;
     font-size: 11px;
@@ -445,8 +451,8 @@ class ColorModeSidebar(QWidget):
         layout.addLayout(swatch_row)
 
         layout.addSpacing(6)
-        rainbow_btn = QPushButton("Rainbow")
-        rainbow_btn.setToolTip("A fresh random rainbow gradient across the selected zone, every click")
+        rainbow_btn = QPushButton("Random colours")
+        rainbow_btn.setToolTip("A fresh random colour gradient across the selected zone, every click")
         rainbow_btn.clicked.connect(self.on_apply_rainbow)
         layout.addWidget(rainbow_btn)
         layout.addStretch()
@@ -659,11 +665,11 @@ class ColorModeSidebar(QWidget):
             self.canvas.set_colors_map(preview)
             if fill_count:
                 self.status_label.setText(
-                    f"{target} set to a rainbow gradient ({len(ordered_keys)} keys + "
+                    f"{target} set to random colours ({len(ordered_keys)} keys + "
                     f"{fill_count} whole-board-fill keys, {self.brightness_pct}%)"
                 )
             else:
-                self.status_label.setText(f"{target} set to a rainbow gradient ({len(ordered_keys)} keys, {self.brightness_pct}%)")
+                self.status_label.setText(f"{target} set to random colours ({len(ordered_keys)} keys, {self.brightness_pct}%)")
         else:
             self.status_label.setText(f"FAILED: {err}")
 
@@ -746,6 +752,13 @@ def _vseparator():
     line = QFrame()
     line.setObjectName("Separator")
     line.setFrameShape(QFrame.VLine)
+    return line
+
+
+def _hseparator():
+    line = QFrame()
+    line.setObjectName("HSeparator")
+    line.setFrameShape(QFrame.HLine)
     return line
 
 
@@ -998,11 +1011,21 @@ class GKeysTab(QWidget):
         super().__init__()
         self.canvas = canvas
         self.current_profile = "M1"
+
+        # Wrapped in its own QVBoxLayout with a thin rule on top -- real
+        # complaint from live use: sitting directly under the canvas
+        # with no visual break, this strip read as part of the keyboard
+        # image rather than its own distinct macro-editing section.
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+        outer.addWidget(_hseparator())
+
         layout = QHBoxLayout()
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(8)
 
-        label = QLabel("G-Keys")
+        label = QLabel("Add New Macro")
         layout.addWidget(label)
         layout.addSpacing(12)
 
@@ -1030,7 +1053,8 @@ class GKeysTab(QWidget):
             layout.addWidget(btn)
             self.key_buttons[name] = btn
 
-        self.setLayout(layout)
+        outer.addLayout(layout)
+        self.setLayout(outer)
         self.select_profile("M1")  # also lights the LED + syncs the canvas highlight
 
         # Physical M1/M2/M3 presses go through g910_macro_daemon.py
@@ -1145,26 +1169,28 @@ class ProfilesTab(QWidget):
         # any number of saved profiles stay reachable by scrolling.
         self.list_layout = QVBoxLayout()
         self.list_layout.setSpacing(4)
-        list_container = QWidget()
-        list_container.setLayout(self.list_layout)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list_container = QWidget()
+        self.list_container.setLayout(self.list_layout)
+        self.profiles_scroll = QScrollArea()
+        self.profiles_scroll.setWidgetResizable(True)
+        self.profiles_scroll.setFrameShape(QFrame.NoFrame)
+        self.profiles_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         # Capped, not stretched to fill the panel's full remaining
         # height -- with a stretch factor and few profiles, the
         # resizable container stretched to match the viewport, leaving
         # a big blank gap below the actual cards before the status
-        # label. A fixed cap gives predictable behavior either way:
-        # short lists sit compact, long lists scroll within this box.
-        # 170, not 260 -- this panel was the tallest column in the
-        # window (429px sizeHint) once the sidebar got its own scroll
-        # cap, so the window was still growing to fit THIS panel
-        # instead of the keyboard canvas. Tightened to bring the whole
-        # window back down to roughly the canvas's own height.
-        scroll.setMaximumHeight(300)
-        scroll.setWidget(list_container)
-        layout.addWidget(scroll)
+        # label. 300 is the ceiling for a long list (scrolls past
+        # that); refresh_list() below additionally sets a FIXED height
+        # each time based on the real card count, so a short list (1-2
+        # profiles) sits exactly as tall as its own cards instead of
+        # stretching to fill 300px regardless -- real complaint from
+        # live use: setMaximumHeight alone still let a resizable-widget
+        # scroll area claim the full 300px even with a single card in
+        # it, because QScrollArea's own sizeHint doesn't shrink to
+        # match a widgetResizable child's actual content height.
+        self.profiles_scroll.setMaximumHeight(300)
+        self.profiles_scroll.setWidget(self.list_container)
+        layout.addWidget(self.profiles_scroll)
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("Status")
@@ -1185,6 +1211,8 @@ class ProfilesTab(QWidget):
         names = bl.list_profiles()
         if not names:
             self.list_layout.addWidget(QLabel("No profiles saved yet."))
+            self.list_container.adjustSize()
+            self.profiles_scroll.setFixedHeight(min(self.list_container.sizeHint().height(), 300))
             return
         for name in names:
             # Stacked (name above Load/Delete), not side-by-side -- a
@@ -1221,6 +1249,16 @@ class ProfilesTab(QWidget):
             container.setObjectName("Card")
             container.setLayout(entry)
             self.list_layout.addWidget(container)
+
+        # Sized to the real content, capped at 300 -- computed AFTER
+        # every card above is actually added, so it reflects the
+        # true count each time (1 profile sits compact, a long list
+        # still scrolls within the 300px ceiling). sizeHint() alone
+        # here (not adjustSize()/an event-loop-dependent call) because
+        # the layout above has already been populated synchronously.
+        self.list_container.adjustSize()
+        content_height = self.list_container.sizeHint().height()
+        self.profiles_scroll.setFixedHeight(min(content_height, 300))
 
     def on_save(self):
         name, ok = QInputDialog.getText(self, "Save Profile", "Profile name:")
