@@ -15,7 +15,7 @@ Logitech never shipped Linux support for this keyboard. G HUB is Windows-only, a
 
 - **Every key, any colour.** Click a key on the on-screen keyboard to colour it directly, drag-select a whole area at once, or bulk-colour a named zone (Logo, G-Keys, F-row, Numpad, Nav Cluster, Main Board) from the sidebar in one click.
 - **A colour picker that doesn't fight you.** 15 named presets plus a hex field with a live preview swatch, and an optional native Colour Picker button if you'd rather eyeball it than type a hex.
-- **A Random Colours preset**, one click. Sweeps a fresh colour-wheel gradient across whichever zone you've selected, in the keys' real physical order — a different starting hue every time you click it.
+- **A Random Colours (WIP) preset**, one click. Sweeps a colour-wheel gradient across whichever zone you've selected with a random starting hue each time — currently a gradient sweep, not yet fully independent per-key randomness, hence the WIP.
 - **Animated effects** — Breathing, Colour Cycle, and Rainbow Wave — running in the background without freezing the rest of the app, with a Speed slider you can drag live, mid-animation.
 - **G-keys that actually do something.** Record and play back macros across three switchable M1/M2/M3 profiles, with M1/M2/M3/MR rendered as real clickable parts of the keyboard, not just labels bolted on the side.
 - **Save as many full lighting setups as you want**, and jump back to any of them instantly — including whichever animated effect was running, not just a frozen colour.
