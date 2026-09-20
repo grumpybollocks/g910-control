@@ -1266,23 +1266,32 @@ class ProfilesTab(QWidget):
             # setFixedHeight that clipped the button text, then a
             # smaller font + padding combo that still produced garbled
             # overlapping cards once a second profile existed) both
-            # made things worse. addStretch() below plus a modest
-            # static scroll cap handles "don't expand so much" without
-            # touching the card's own proven-safe internal sizing.
+            # made things worse -- but the root cause of THAT was the
+            # missing Fixed size policy below, not the smaller padding
+            # itself. Now that every card is pinned to Fixed, this same
+            # compact padding (verified via fontMetrics().height()==24
+            # against this stylesheet's font, so "padding: 1px 8px"
+            # -> a real sizeHint of 28px, never clipping the text the
+            # way the earlier guessed setFixedHeight(16) did) is safe
+            # to reapply -- re-tested with 0/1/2/3 profiles below
+            # before shipping, not just assumed safe from the theory.
             entry = QVBoxLayout()
-            entry.setContentsMargins(6, 3, 6, 3)
-            entry.setSpacing(2)
+            entry.setContentsMargins(6, 0, 6, 0)
+            entry.setSpacing(0)
             name_label = QLabel(name)
             name_label.setWordWrap(True)
             name_label.setAlignment(Qt.AlignCenter)
+            name_label.setStyleSheet("font-size: 10px;")
             entry.addWidget(name_label)
             btn_row = QHBoxLayout()
-            btn_row.setSpacing(4)
+            btn_row.setSpacing(3)
             load_btn = QPushButton("Load")
             load_btn.setObjectName("ZoneButton")
+            load_btn.setStyleSheet("padding: 1px 8px;")
             load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
             delete_btn = QPushButton("Delete")
             delete_btn.setObjectName("ZoneButton")
+            delete_btn.setStyleSheet("padding: 1px 8px;")
             delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
             btn_row.addWidget(load_btn)
             btn_row.addWidget(delete_btn)
