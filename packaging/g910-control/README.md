@@ -257,6 +257,25 @@ correct natural height (64px) with zero compression or inflation.
 Real build against the live `g910-v1.14` URL, `namcap` clean (same two
 known false positives), extracted-package personal-data audit clean.
 
+**v1.15** (safely re-apply the profile card height reduction): v1.14
+fixed real card corruption by fully reverting a height reduction back
+to the original ~64px size -- but that corruption's actual root cause
+was the missing `QSizePolicy.Fixed` (shipped in v1.14 itself), not the
+smaller padding/font choices from the reverted attempt. With that
+policy now correctly pinning every card, the same compact sizing is
+safe to reapply: tighter margins/spacing, a 10px name label font, and
+`ZoneButton` padding reduced to "1px 8px" (checked against this font's
+real `fontMetrics().height()` of 24px before use -- sizeHint comes out
+to 28px, so text can't clip the way the earlier guessed
+`setFixedHeight(16)` did in v1.12). Cards now measure 42px, down from
+61-64px. Re-verified with the same 0/1/2/3-profile stress test as
+v1.14, plus a real multi-word name ("profile i like") to confirm
+wordWrap still has room if it's ever needed -- every card's rendered
+height matched its own sizeHint exactly at every count, on both the
+source and the actual built package. Real build against the live
+`g910-v1.15` URL, `namcap` clean (same two known false positives),
+extracted-package personal-data audit clean.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
