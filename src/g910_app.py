@@ -155,6 +155,10 @@ QPushButton#ZoneButton {
     text-align: center;
     padding: 3px 8px;
 }
+QPushButton#ZoneButtonCompact {
+    text-align: center;
+    padding: 1px 8px;
+}
 QWidget#Panel {
     background-color: #1c1c20;
     border: 1px solid #2a2a30;
@@ -1223,7 +1227,7 @@ class ProfilesTab(QWidget):
         # already set, compounded into worse and worse states as more
         # profiles were added -- confirmed via a real screenshot after
         # a second save: overlapping, garbled, near-unreadable cards.
-        # 160px (roughly 2-3 cards at their normal, unshrunk size) plus
+        # 160px (roughly 3-4 of the compact ~42px cards used below) plus
         # addStretch() below is simple, deterministic Qt with no
         # feedback loop: few profiles sit compact with blank space
         # below them (not stretched into), more than that scrolls.
@@ -1286,12 +1290,10 @@ class ProfilesTab(QWidget):
             btn_row = QHBoxLayout()
             btn_row.setSpacing(3)
             load_btn = QPushButton("Load")
-            load_btn.setObjectName("ZoneButton")
-            load_btn.setStyleSheet("padding: 1px 8px;")
+            load_btn.setObjectName("ZoneButtonCompact")
             load_btn.clicked.connect(lambda _, n=name: self.on_load(n))
             delete_btn = QPushButton("Delete")
-            delete_btn.setObjectName("ZoneButton")
-            delete_btn.setStyleSheet("padding: 1px 8px;")
+            delete_btn.setObjectName("ZoneButtonCompact")
             delete_btn.clicked.connect(lambda _, n=name: self.on_delete(n))
             btn_row.addWidget(load_btn)
             btn_row.addWidget(delete_btn)

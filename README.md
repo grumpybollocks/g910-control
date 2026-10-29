@@ -42,11 +42,22 @@ Logitech never shipped Linux support for this keyboard. G HUB is Windows-only, a
 
 ## Installing
 
-Two fully-supported ways — a plain script installer, or the real Arch
-package — both covered step by step, including the two things that
-still need doing manually after a package install (enabling the
-background services, and a udev-rule replug), in
-**[`INSTALL.md`](INSTALL.md)**.
+```
+git clone https://github.com/grumpybollocks/g910-control.git
+cd g910-control
+./install-g910.sh
+```
+
+That's it — the script checks what's already on your system, installs
+only what's missing (including `keyleds`, the one AUR dependency, via
+`yay`/`paru` if you have either), sets up the background service, and
+adds a desktop launcher.
+
+Prefer a real Arch package instead (`makepkg -si`), or don't have
+`git`? Both covered, step by step, in **[`INSTALL.md`](INSTALL.md)** —
+along with the two things to run manually after a *package* install
+specifically (pacman doesn't start services or replug hardware for
+you), and how to verify it all actually worked.
 
 ## How it talks to the keyboard
 
