@@ -276,6 +276,22 @@ source and the actual built package. Real build against the live
 `g910-v1.15` URL, `namcap` clean (same two known false positives),
 extracted-package personal-data audit clean.
 
+**v1.16** (macros, MR quick-record, every key addressable, per-key
+colour fix, icon): the G-key daemon now re-arms after suspend and
+replug (software G-key mode is volatile), ignores LED-write replies
+that decoded as phantom key presses, and turns MR into quick-record
+(MR, G-key, type, MR to save). The six modifier keys (Alt, Win, right
+Ctrl/Shift) and the second logo zone are now individually addressable.
+New right-click per-key colour correction for physically tinted LEDs,
+with exact read-back so profiles keep the chosen colour. Audit fixes:
+non-blocking hidraw reads, SIGTERM clean-up, locked macro writes,
+device re-find when the app starts before the keyboard is plugged in.
+Verified on hardware: all 115 cells written with unique colours and
+read back exactly, all 6 zones with no leakage, rainbow, profile
+round trip, SIGTERM clears the record state. Real build against the
+live `g910-v1.16` URL, `namcap` clean (added `hicolor-icon-theme` for
+the new icon), extracted-package personal-data audit clean.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
