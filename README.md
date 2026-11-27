@@ -87,6 +87,12 @@ always quirkier than the docs — when there are any docs at all:
   up politely — it just corrupts the response. Real protocol-level
   rock-paper-scissors, not a software bug to patch around.
 
+## Keys showing the wrong colour?
+
+Some LEDs fail with age or after liquid damage. [docs/LED_FAULTS.md](docs/LED_FAULTS.md)
+has a three-colour test to find out which, a check that it isn't
+software, and presets that hide the faulty keys.
+
 ## License
 
 [MIT](LICENSE).
