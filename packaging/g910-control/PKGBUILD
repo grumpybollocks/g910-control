@@ -65,5 +65,8 @@ EOF
   install -Dm644 packaging/g910-control/g910-control.desktop \
     "$pkgdir/usr/share/applications/$pkgname.desktop"
 
+  install -Dm644 packaging/g910-control/g910-control.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

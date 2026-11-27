@@ -29,8 +29,8 @@ here (per the user's earlier explicit decision: it's a literal
 macro-record toggle, a separate feature for the future macro daemon,
 not a GUI profile selector).
 """
+import os
 import sys
-import json
 import random
 import select
 from pathlib import Path
@@ -42,14 +42,14 @@ from PyQt5.QtWidgets import (
     QColorDialog, QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QIcon
 import evdev
 from evdev import ecodes
 
 import g910_backlight as bl
 from g910_canvas import KeyboardCanvas, ZONE_KEYS, ZONE_SELECTION_KEYS, PRESET_COLORS, ALL_CELLS
 
-MACROS_FILE = bl.DATA_DIR / "g910_macros.json"  # separate from the G510s's macros.json
+from g910_macro_daemon import MACROS_FILE, load_macros, save_macro, clear_macro, clean_sequence
 
 
 def _find_g910_event_device():
@@ -75,7 +75,9 @@ def _find_g910_event_device():
             dev = evdev.InputDevice(path)
         except OSError:
             continue
-        if (dev.info.vendor, dev.info.product) == (0x046D, 0xC335) and dev.phys.endswith("input0"):
+        match = (dev.info.vendor, dev.info.product) == (0x046D, 0xC335) and dev.phys.endswith("input0")
+        dev.close()
+        if match:
             return path
     return None
 
@@ -557,6 +559,7 @@ class ColorModeSidebar(QWidget):
 
     def on_brightness_changed(self, value):
         self.brightness_pct = value
+        self.canvas.brightness_pct = value  # per-key colours follow the same slider
         self.bright_value_label.setText(f"{value}%")
 
     def select_target(self, name):
@@ -861,43 +864,27 @@ class MainView(QWidget):
         self.canvas.zone_clicked.connect(sidebar.sync_target)
         self.canvas.mkey_clicked.connect(self.on_mkey_clicked)
         self.canvas.color_applied.connect(sidebar._stop_effect)
+        self.canvas.about_to_apply.connect(sidebar._stop_effect)
+        self.canvas.key_fix_requested.connect(self.on_key_fix)
+        self.canvas.brightness_pct = sidebar.brightness_pct
+
+    def on_key_fix(self, key_name, label):
+        self.findChildren(ColorModeSidebar)[0]._stop_effect()
+        KeyFixDialog(key_name, label, self).exec_()
 
     def on_mkey_clicked(self, name):
         if name == "MR":
-            self._mr_active = not self._mr_active
-            ok, err = bl.set_mrkey_led(self._mr_active)
-            if not ok:
-                print(f"FAILED to toggle MR LED: {err}")
-                self._mr_active = not self._mr_active  # revert, the LED didn't actually change
-                return
-            self.canvas.set_mr_active(self._mr_active)
+            # MR belongs to the daemon's quick-record now; lighting the LED
+            # from here would look "armed" while the daemon is idle.
+            self.gkeys_panel.status_label.setText(
+                "MR records on the keyboard: press MR, then a G-key, type, MR to save")
+            self.gkeys_panel._record_state = None  # next poll restores the label
         else:
             self.gkeys_panel.select_profile(name)
 
 
 # --- G-Key Macros panel (embedded in MainView; ported from
 # g510_app.py's proven pattern) --------------------------------------
-
-def load_macros():
-    if MACROS_FILE.exists():
-        try:
-            return json.loads(MACROS_FILE.read_text())
-        except Exception:
-            pass
-    return {"M1": {}, "M2": {}, "M3": {}}
-
-
-def save_macro(profile, gkey, value, kind="keys"):
-    macros = load_macros()
-    macros.setdefault(profile, {})[gkey] = {"type": kind, "value": value}
-    MACROS_FILE.write_text(json.dumps(macros, indent=2))
-
-
-def clear_macro(profile, gkey):
-    macros = load_macros()
-    macros.setdefault(profile, {}).pop(gkey, None)
-    MACROS_FILE.write_text(json.dumps(macros, indent=2))
-
 
 class RecorderThread(QThread):
     """Captures real keystrokes from the main keyboard while recording,
@@ -916,8 +903,15 @@ class RecorderThread(QThread):
         self._stop = True
 
     def run(self):
-        dev = evdev.InputDevice(MAIN_KEYBOARD_DEVICE)
-        dev.grab()
+        # Looked up now, not at app start: the event node changes when
+        # the keyboard is replugged, and a failure here used to kill the
+        # thread and leave the dialog stuck on "Recording..." for good.
+        try:
+            dev = evdev.InputDevice(_find_g910_event_device() or MAIN_KEYBOARD_DEVICE)
+            dev.grab()
+        except (OSError, TypeError):
+            self.finished_recording.emit("")
+            return
         try:
             while not self._stop:
                 r, _, _ = select.select([dev.fd], [], [], 0.1)
@@ -925,11 +919,11 @@ class RecorderThread(QThread):
                     continue
                 for event in dev.read():
                     if event.type == ecodes.EV_KEY:
-                        self._events.append(f"{event.code}:{event.value}")
+                        self._events.append((event.code, event.value))
         finally:
             dev.ungrab()
             dev.close()
-        self.finished_recording.emit(" ".join(self._events))
+        self.finished_recording.emit(clean_sequence(self._events))
 
 
 class MacroRecordDialog(QDialog):
@@ -991,7 +985,7 @@ class MacroRecordDialog(QDialog):
 
     def toggle_recording(self):
         if self.recorder is None:
-            if MAIN_KEYBOARD_DEVICE is None:
+            if MAIN_KEYBOARD_DEVICE is None and _find_g910_event_device() is None:
                 self.status_label.setText("No G910 keyboard found -- is it plugged in?")
                 return
             self.status_label.setText("Recording... press your key combo, then click Stop.")
@@ -1043,6 +1037,97 @@ class MacroRecordDialog(QDialog):
         self.accept()
 
 
+class KeyFixDialog(QDialog):
+    """Per-key colour correction for an LED that no longer shows colours
+    true (e.g. red glowing too strongly). Lights the WHOLE keyboard in a
+    test colour so the key can be compared with its neighbours, and
+    updates that one key live as the sliders move. The keyboard's
+    previous colours are put back exactly on close."""
+    TEST_COLOURS = (("White", "ffffff"), ("Purple", "a020f0"), ("Green", "00ff00"), ("Cyan", "00ffff"))
+
+    def __init__(self, key_name, label, parent=None):
+        super().__init__(parent)
+        self.key_name = key_name
+        self.setWindowTitle(f"Fix colour: {label}")
+        self.test_hex = "ffffff"
+        # The colours you chose (read back with any existing correction
+        # undone), so closing can put them back with the NEW correction.
+        self._saved = bl._get_block_colors("keys")
+        gains = bl.load_key_fix().get(key_name, [100, 100, 100])
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            f"Make <b>{label}</b> match the keys around it.\n"
+            "Lower a colour if this key shows too much of it."))
+        test_row = QHBoxLayout()
+        test_row.addWidget(QLabel("Test with:"))
+        for name, hexc in self.TEST_COLOURS:
+            btn = QPushButton(name)
+            btn.clicked.connect(lambda _, h=hexc: self.set_test(h))
+            test_row.addWidget(btn)
+        layout.addLayout(test_row)
+
+        self.sliders = []
+        # Coalesce slider drags into one device write per 60 ms
+        self._apply_timer = QTimer(self)
+        self._apply_timer.setSingleShot(True)
+        self._apply_timer.setInterval(60)
+        self._apply_timer.timeout.connect(self.apply)
+        for i, channel in enumerate(("Red", "Green", "Blue")):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(channel))
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(0, 100)
+            sl.setValue(gains[i])
+            value = QLabel(f"{gains[i]}%")
+            value.setFixedWidth(40)
+            sl.valueChanged.connect(lambda v, lab=value: (lab.setText(f"{v}%"), self._apply_timer.start()))
+            row.addWidget(sl)
+            row.addWidget(value)
+            layout.addLayout(row)
+            self.sliders.append(sl)
+
+        buttons = QHBoxLayout()
+        reset = QPushButton("Reset key")
+        reset.clicked.connect(lambda: [s.setValue(100) for s in self.sliders])
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        save = QPushButton("Save")
+        save.clicked.connect(self.accept)
+        buttons.addWidget(reset)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(save)
+        layout.addLayout(buttons)
+        self.set_test(self.test_hex)
+
+    def set_test(self, hexc):
+        self.test_hex = hexc
+        names = bl._all_key_names("keys")
+        bl._run_set_leds("keys", [f"{k}={hexc}" for k in names])
+        self.apply()  # this key shows the sliders' current (unsaved) values
+
+    def gains(self):
+        return [s.value() for s in self.sliders]
+
+    def apply(self):
+        """Preview only -- nothing is saved until Save is clicked, so a
+        stray right-click or slider nudge can't leave a key miscoloured
+        (that happened: Arrow down saved with green at 0%, showed pink)."""
+        directive = bl._fix_directive(f"{self.key_name}={self.test_hex}", {self.key_name: self.gains()})
+        bl._run_set_leds("keys", [directive], raw=True)
+
+    def accept(self):
+        bl.save_key_fix(self.key_name, self.gains())
+        super().accept()
+
+    def done(self, result):
+        self._apply_timer.stop()  # a pending preview must not land after the restore
+        if self._saved:
+            bl._run_set_leds("keys", [f"{k}={v.lstrip('#')}" for k, v in self._saved.items()])
+        super().done(result)
+
+
 class GKeysTab(QWidget):
     """M1/M2/M3 profile toggle + G1-G9 macro buttons, as a single
     compact horizontal strip -- lives directly under the canvas (see
@@ -1051,6 +1136,8 @@ class GKeysTab(QWidget):
     macro-record toggle for the future physical-key-driven daemon, not
     a 4th GUI profile (the user's explicit decision earlier in this
     project)."""
+    IDLE_TEXT = "Macros (click a G-key)"
+
     def __init__(self, canvas=None):
         super().__init__()
         self.canvas = canvas
@@ -1069,8 +1156,14 @@ class GKeysTab(QWidget):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(8)
 
-        label = QLabel("Add New Macro")
-        layout.addWidget(label)
+        self.status_label = QLabel(self.IDLE_TEXT)
+        self.status_label.setMinimumWidth(170)
+        self.status_label.setToolTip(
+            "Click a G-key to assign a macro or command.\n"
+            "Or on the keyboard: press MR, press a G-key, type, press MR again.")
+        layout.addWidget(self.status_label)
+        self._macros_mtime = None
+        self._record_state = ""
         layout.addSpacing(12)
 
         self.profile_buttons = {}
@@ -1134,7 +1227,6 @@ class GKeysTab(QWidget):
         reads this file back on every wake (see its read_active_profile
         docstring), not just when it writes it itself on a physical
         M-key press."""
-        import os
         runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
         Path(runtime, "g910_macro_profile").write_text(name)
 
@@ -1148,15 +1240,38 @@ class GKeysTab(QWidget):
             btn.setStyleSheet("border: 2px solid #d4af37;" if name in assigned else "")
 
     def poll_active_profile(self):
-        import os
-        runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
-        profile_file = Path(runtime, "g910_macro_profile")
+        runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
         try:
-            live = profile_file.read_text().strip()
+            live = (runtime / "g910_macro_profile").read_text().strip()
         except Exception:
-            return
+            live = None
         if live in self.profile_buttons and live != self.current_profile:
             self.select_profile(live)
+
+        # MR quick-record status from the daemon ('' / 'armed' / 'recording G3')
+        try:
+            state = (runtime / "g910_macro_record").read_text().strip()
+        except Exception:
+            state = ""
+        if state != self._record_state:
+            self._record_state = state
+            if state == "armed":
+                text, colour = "MR armed: press a G-key", "#d4af37"
+            elif state.startswith("recording"):
+                text, colour = f"Recording {state.split()[-1]}: MR to save", "#ff5c5c"
+            else:
+                text, colour = self.IDLE_TEXT, ""
+            self.status_label.setText(text)
+            self.status_label.setStyleSheet(f"color: {colour};" if colour else "")
+
+        # A macro recorded with MR lands in the file behind the app's back
+        try:
+            mtime = MACROS_FILE.stat().st_mtime
+        except OSError:
+            mtime = None
+        if mtime != self._macros_mtime:
+            self._macros_mtime = mtime
+            self.refresh_assigned_keys()
 
     def open_key_dialog(self, gkey):
         dlg = MacroRecordDialog(self.current_profile, gkey, self)
@@ -1452,6 +1567,12 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setApplicationName("g910-control")
+    app.setDesktopFileName("g910-control")  # lets Wayland/KDE match the window to its launcher + icon
+    icon = QIcon.fromTheme("g910-control")
+    if icon.isNull():  # running from a checkout, not installed
+        icon = QIcon(str(Path(__file__).resolve().parent.parent / "packaging" / "g910-control" / "g910-control.svg"))
+    app.setWindowIcon(icon)
     win = MainWindow()
     win.show()
     sys.exit(app.exec_())

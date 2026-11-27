@@ -166,6 +166,10 @@ MKEY_FONT_PT = 6
 # overlapping G1's cell below it.
 LOGO_CELLS = [
     Cell("LOGO1", "G", -1, -1.3, width=1.05, height=1.15, block="logo"),
+    # Second logo LED (the "G910" badge) -- always existed on the
+    # device (logo block has 2 LEDs) but had no cell, so it could only
+    # ever be coloured together with the G logo.
+    Cell("LOGO2", "910", -1, 12.6, width=1.3, block="logo"),
 ]
 
 # --- G-keys: G1-G5 left column, G6-G9 top row (was directly above
@@ -209,16 +213,16 @@ MAIN_CELLS = [
     Cell("X", "X", 4, 3.25), Cell("C", "C", 4, 4.25), Cell("V", "V", 4, 5.25),
     Cell("B", "B", 4, 6.25), Cell("N", "N", 4, 7.25), Cell("M", "M", 4, 8.25),
     Cell("COMMA", ",", 4, 9.25), Cell("DOT", ".", 4, 10.25), Cell("SLASH", "/", 4, 11.25),
-    Cell("_RSHIFT", "Shift", 4, 12.25, width=2.75, block="keys", individually_colorable=False),
+    Cell("RSHIFT", "Shift", 4, 12.25, width=2.75),
     # bottom row
     Cell("LCTRL", "Ctrl", 5, 0, width=1.25),
-    Cell("_LWIN", "Win", 5, 1.25, width=1.25, block="keys", individually_colorable=False),
-    Cell("_LALT", "Alt", 5, 2.5, width=1.25, block="keys", individually_colorable=False),
+    Cell("LMETA", "Win", 5, 1.25, width=1.25),
+    Cell("LALT", "Alt", 5, 2.5, width=1.25),
     Cell("SPACE", "Space", 5, 3.75, width=6.25),
-    Cell("_ALTGR", "AltGr", 5, 10.0, width=1.25, block="keys", individually_colorable=False),
-    Cell("_RWIN", "Win", 5, 11.25, width=1.25, block="keys", individually_colorable=False),
-    Cell("_MENU", "Menu", 5, 12.5, width=1.25, block="keys", individually_colorable=False),
-    Cell("_RCTRL", "Ctrl", 5, 13.75, width=1.25, block="keys", individually_colorable=False),
+    Cell("RALT", "AltGr", 5, 10.0, width=1.25),
+    Cell("RMETA", "Win", 5, 11.25, width=1.25),
+    Cell("COMPOSE", "Menu", 5, 12.5, width=1.25),
+    Cell("RCTRL", "Ctrl", 5, 13.75, width=1.25),
 ]
 
 NAV_COL0 = 15.5  # one gap column right of the main board (main board ends ~col15)
@@ -318,12 +322,15 @@ MR_ACTIVE_COLOR = QColor(196, 70, 58)      # distinct warm color -- MR is a diff
 
 class KeyboardCanvas(QWidget):
     zone_clicked = pyqtSignal(str)  # emitted with a ZONE_KEYS name when a colorable key is clicked -- lets the sidebar follow along
+    key_fix_requested = pyqtSignal(str, str)  # right-click: (key_name, label) -> colour-fix dialog
+    about_to_apply = pyqtSignal()  # emitted just before a per-key colour is sent
     mkey_clicked = pyqtSignal(str)  # emitted with "M1"/"M2"/"M3"/"MR" when one of those cells is clicked
     color_applied = pyqtSignal()   # emitted after a successful direct drag-select-and-pick apply -- lets the sidebar stop a running effect that would otherwise silently overwrite this on its next tick
 
     def __init__(self):
         super().__init__()
         self._colors = {}  # key_name -> QColor, unset keys use KEY_UNSET_COLOR
+        self.brightness_pct = 100  # kept in sync by the sidebar slider
         self._selection = set()  # set of key_name currently selected
         self._press_pos = None
         self._drag_rect = None
@@ -497,6 +504,11 @@ class KeyboardCanvas(QWidget):
             self._selection = new_sel
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            cell = self._cell_at(QPointF(event.pos()))
+            if cell is not None and cell.block == "keys":
+                self.key_fix_requested.emit(cell.key_name, cell.label)
+            return
         if event.button() != Qt.LeftButton:
             return
 
@@ -544,7 +556,15 @@ class KeyboardCanvas(QWidget):
             self._selection = set() if was_click else self._selection
             self.update()
             return
+        # Same brightness the zone buttons use -- per-key colours used
+        # to ignore the slider, so a key and its zone set to the "same"
+        # colour came out visibly different.
+        pct = max(0, min(100, self.brightness_pct))
+        color = QColor(color.red() * pct // 100, color.green() * pct // 100, color.blue() * pct // 100)
         hexcolor = color.name().lstrip("#")
+        # A running effect repaints its zone every tick and would wipe
+        # this colour out again a moment later -- stop it first.
+        self.about_to_apply.emit()
 
         by_block = {}
         for cell in ALL_CELLS:

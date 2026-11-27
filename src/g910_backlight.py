@@ -62,6 +62,49 @@ def _find_device():
 
 
 DEVICE = _find_device()
+
+
+def _have_device():
+    """True if a G910 is known, looking it up again if the app started
+    before the keyboard was plugged in."""
+    global DEVICE
+    if DEVICE is None:
+        DEVICE = _find_device()
+    return DEVICE is not None
+
+
+def _kctl(*args):
+    """Runs keyledsctl against the G910. If the keyboard was replugged
+    its hidraw path changes (seen live: hidraw2 -> hidraw1) and every
+    call from an already-open app failed until it was restarted. On a
+    "Cannot open" failure, look the device up again and retry once."""
+    global DEVICE
+    if DEVICE is None:
+        DEVICE = _find_device()
+        if DEVICE is None:
+            return subprocess.CompletedProcess(args, 1, "", "No G910 keyboard found -- is it plugged in?")
+    result = subprocess.run(["keyledsctl", args[0], "-d", DEVICE, *args[1:]], capture_output=True, text=True)
+    if result.returncode != 0 and "Cannot open" in result.stderr:
+        fresh = _find_device()
+        if fresh is not None:
+            DEVICE = fresh
+            result = subprocess.run(["keyledsctl", args[0], "-d", DEVICE, *args[1:]], capture_output=True, text=True)
+    return result
+
+
+def _open_keyleds(lib):
+    """libkeyleds handle for the G910, re-finding the device once if
+    the remembered path has gone stale (replug)."""
+    global DEVICE
+    device = lib.keyleds_open(DEVICE.encode(), _KEYLEDSCTL_APP_ID) if DEVICE else None
+    if not device:
+        fresh = _find_device()
+        if fresh is not None:
+            DEVICE = fresh
+            device = lib.keyleds_open(DEVICE.encode(), _KEYLEDSCTL_APP_ID)
+    return device
+
+
 PROFILES_FILE = DATA_DIR / "g910_profiles.json"
 # Blocks a full lighting snapshot covers. "media" deliberately excluded
 # -- paused per the user's explicit instruction not to touch it, see
@@ -97,13 +140,13 @@ def set_mkey_led(profile_name):
     'M3'), turning the others off (the mask REPLACES, doesn't add --
     confirmed empirically earlier: setting M2 turned M1 off
     automatically)."""
-    if DEVICE is None:
+    if not _have_device():
         return False, "No G910 keyboard found -- is it plugged in?"
     mask = _MKEY_MASKS.get(profile_name)
     if mask is None:
         return False, f"Unknown profile: {profile_name}"
     lib = _keyleds_lib()
-    device = lib.keyleds_open(DEVICE.encode(), _KEYLEDSCTL_APP_ID)
+    device = _open_keyleds(lib)
     if not device:
         return False, lib.keyleds_get_error_str().decode()
     ok = lib.keyleds_mkeys_set(device, _KEYLEDS_TARGET_DEFAULT, mask)
@@ -113,10 +156,10 @@ def set_mkey_led(profile_name):
 
 
 def set_mrkey_led(on):
-    if DEVICE is None:
+    if not _have_device():
         return False, "No G910 keyboard found -- is it plugged in?"
     lib = _keyleds_lib()
-    device = lib.keyleds_open(DEVICE.encode(), _KEYLEDSCTL_APP_ID)
+    device = _open_keyleds(lib)
     if not device:
         return False, lib.keyleds_get_error_str().decode()
     ok = lib.keyleds_mrkeys_set(device, _KEYLEDS_TARGET_DEFAULT, 0x01 if on else 0x00)
@@ -147,12 +190,91 @@ GROUPS = {
 }
 
 
-def _run_set_leds(block, directives):
-    """directives: list of 'KEY=hexcolor' strings, sent in one call."""
-    if DEVICE is None:
-        return False, "No G910 keyboard found -- is it plugged in?"
-    cmd = ["keyledsctl", "set-leds", "-d", DEVICE, "-b", block] + directives
-    result = subprocess.run(cmd, capture_output=True, text=True)
+KEY_FIX_FILE = DATA_DIR / "g910_key_fix.json"
+_key_fix_cache = {"mtime": None, "data": {}}
+
+
+def load_key_fix():
+    """{key_name: [red%, green%, blue%]} -- per-key colour correction
+    for LEDs that no longer show colours true (e.g. a key whose red
+    lights up too strongly gets red 40%). Re-read whenever the file
+    changes so the app and a hand edit always agree."""
+    try:
+        mtime = KEY_FIX_FILE.stat().st_mtime
+    except OSError:
+        _key_fix_cache.update(mtime=None, data={})
+        return {}
+    if mtime != _key_fix_cache["mtime"]:
+        try:
+            data = json.loads(KEY_FIX_FILE.read_text())
+            data = {k: [max(0, min(100, int(x))) for x in v][:3] for k, v in data.items()
+                    if isinstance(v, list) and len(v) == 3}
+        except (ValueError, TypeError, OSError):
+            data = {}
+        _key_fix_cache.update(mtime=mtime, data=data)
+    return _key_fix_cache["data"]
+
+
+def save_key_fix(key_name, gains):
+    data = dict(load_key_fix())
+    if gains is None or list(gains) == [100, 100, 100]:
+        data.pop(key_name, None)
+    else:
+        data[key_name] = [int(g) for g in gains]
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = KEY_FIX_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
+    os.replace(tmp, KEY_FIX_FILE)
+
+
+def _fix_channel(v, gain):
+    return min(255, round(v * gain / 100))
+
+
+def _unfix_channel(v, gain):
+    # The original value nearest v*100/gain that the fix maps onto v,
+    # so a chosen colour survives fix -> hardware -> read-back (ff stays
+    # ff, 80 stays 80). A channel at gain 0 can't be recovered: report 0.
+    if not gain:
+        return v
+    want = v * 100 / gain
+    hits = [x for x in range(256) if _fix_channel(x, gain) == v]
+    if not hits:
+        return min(255, round(want))
+    return min(hits, key=lambda x: (abs(x - want), -x))
+
+
+def _fix_directive(directive, fixes):
+    name, _, hexcolor = directive.partition("=")
+    gains = fixes.get(name)
+    if not gains or len(hexcolor.lstrip("#")) != 6:
+        return directive
+    h = hexcolor.lstrip("#")
+    rgb = [_fix_channel(int(h[i:i + 2], 16), g) for i, g in zip((0, 2, 4), gains)]
+    return f"{name}={rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def _unfix_color(name, hexcolor, fixes):
+    """Reverse of _fix_directive for read-back, so saved profiles and
+    the on-screen preview hold the colour you CHOSE, not the corrected
+    value actually sent (which would get corrected twice on reload)."""
+    gains = fixes.get(name)
+    if not gains:
+        return hexcolor
+    h = hexcolor.lstrip("#")
+    rgb = [_unfix_channel(int(h[i:i + 2], 16), g) for i, g in zip((0, 2, 4), gains)]
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def _run_set_leds(block, directives, raw=False):
+    """directives: list of 'KEY=hexcolor' strings, sent in one call.
+    Every colour write in the app goes through here, so this is where
+    the per-key correction (load_key_fix) is applied, unless raw=True."""
+    if not raw and block == "keys":
+        fixes = load_key_fix()
+        if fixes:
+            directives = [_fix_directive(d, fixes) for d in directives]
+    result = _kctl("set-leds", "-b", block, *directives)
     if result.returncode != 0:
         return False, result.stderr.strip() or f"exit code {result.returncode}"
     return True, None
@@ -236,41 +358,10 @@ def set_keys_rainbow(block, real_key_names, brightness_pct=100, phase=0.0):
 
 
 def set_main_board_rainbow(real_key_names, brightness_pct=100, phase=0.0):
-    """Rainbow gradient across Main Board's addressable keys, PLUS a
-    real colour for the six individually-unaddressable keys (Win/Alt/
-    AltGr/Menu/right-Ctrl/right-Shift) instead of leaving them
-    whatever they last were -- the actual bug the user kept hitting:
-    set_keys_rainbow alone just skips those six, so they sat there
-    visibly grey/stale while the rest of the board got a gradient.
-
-    Same whole-block-fill-then-restore dance set_main_board_color
-    uses (fill everything via "all=", including the six unreachable-
-    by-name keys, then in one more call restore F1-F12/Numpad/Nav
-    Cluster to what they had and lay the real per-key gradient on top
-    of the fill for Main Board's own addressable keys) -- except the
-    fill colour here is the gradient's own first hue rather than a
-    flat colour someone picked, since there's no single "the" colour
-    for a rainbow to give a key it can't individually address."""
-    if not real_key_names:
-        return False, "No keys to colour."
-    excluded = _excluded_from_main_board()
-    current = _get_block_colors("keys")
-    if not current:
-        return False, "Couldn't read the current key list from the device."
-    preserve = {k: v for k, v in current.items() if k in excluded}
-
-    hexes = rainbow_hexes(len(real_key_names), brightness_pct, phase)
-    ok, err = _run_set_leds("keys", [f"all={hexes[0]}"])
-    if not ok:
-        return False, err
-
-    directives = [f"{k}={h}" for k, h in zip(real_key_names, hexes)]
-    if preserve:
-        directives += [f"{k}={v.lstrip('#')}" for k, v in preserve.items()]
-    ok, err = _run_set_leds("keys", directives)
-    if not ok:
-        return False, f"Fill succeeded but per-key gradient/restore failed: {err}"
-    return True, None
+    """Kept as its own name for callers; every Main Board key is
+    individually addressable (see EXTRA_KEYS), so this is just a plain
+    per-key gradient with no whole-board fill and nothing to restore."""
+    return set_keys_rainbow("keys", real_key_names, brightness_pct, phase)
 
 
 def _real_key_name(block, key_name):
@@ -290,23 +381,61 @@ def set_all_color(hex_color):
     return _run_set_leds("keys", [f"all={hex_color}"])
 
 
+# The six modifier keys keyledsctl's own listing never shows. The
+# device has 111 LED slots in block "keys" but reports "105 keys", and
+# `keyledsctl get-leds` stops after 105 -- so the last six (HID usages
+# 0xe2-0xe7) are cut off the end of the list. They were long believed
+# to have no individual LED; they do, and keyledsctl accepts them by
+# name. Verified on hardware: each one written a different colour and
+# read back correctly from slot offset 105 via libkeyleds.
+EXTRA_KEYS = ("LALT", "LMETA", "RCTRL", "RSHIFT", "RALT", "RMETA")
+_EXTRA_KEYS_OFFSET = 105
+_KEYLEDS_BLOCK_KEYS = 0x01
+
+
+class _KeyColor(ctypes.Structure):
+    _fields_ = [("id", ctypes.c_uint8), ("red", ctypes.c_uint8),
+                ("green", ctypes.c_uint8), ("blue", ctypes.c_uint8)]
+
+
+def _get_extra_key_colors():
+    """{name: '#rrggbb'} for EXTRA_KEYS, read straight from the device.
+    Empty dict on any failure -- callers treat these as optional."""
+    if not _have_device():
+        return {}
+    try:
+        lib = _keyleds_lib()
+        lib.keyleds_get_leds.restype = ctypes.c_bool
+        lib.keyleds_get_leds.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_int,
+                                         ctypes.POINTER(_KeyColor), ctypes.c_uint16, ctypes.c_uint]
+        device = _open_keyleds(lib)
+        if not device:
+            return {}
+        try:
+            arr = (_KeyColor * len(EXTRA_KEYS))()
+            if not lib.keyleds_get_leds(device, _KEYLEDS_TARGET_DEFAULT, _KEYLEDS_BLOCK_KEYS,
+                                        arr, _EXTRA_KEYS_OFFSET, len(EXTRA_KEYS)):
+                return {}
+        finally:
+            lib.keyleds_close(device)
+    except (OSError, AttributeError):
+        return {}
+    by_id = {k.id: f"#{k.red:02x}{k.green:02x}{k.blue:02x}" for k in arr}
+    return {name: by_id[0xe2 + i] for i, name in enumerate(EXTRA_KEYS) if 0xe2 + i in by_id}
+
+
 def _all_key_names(block="keys"):
-    """Live list of every key name the device itself reports for a
-    block -- queried, not hardcoded, so it can't drift out of sync with
-    the real hardware. Deduped: "keys" lists BACKSLASH twice (one
-    permanently-inert phantom zone, confirmed by testing -- it never
-    changes color even on a whole-keyboard write -- plus the one real,
-    addressable zone). Sending the same key twice in one set-leds call
-    is harmless but pointless."""
-    if DEVICE is None:
+    """Every key name in a block: the device's own live list (deduped,
+    it lists BACKSLASH twice) plus, for "keys", the six modifiers its
+    listing cuts off (see EXTRA_KEYS)."""
+    if not _have_device():
         return []
-    result = subprocess.run(
-        ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
-        capture_output=True, text=True,
-    )
+    result = _kctl("get-leds", "-b", block)
     if result.returncode != 0:
         return []
     names = [line.split("=", 1)[0] for line in result.stdout.splitlines() if "=" in line]
+    if block == "keys":
+        names += EXTRA_KEYS
     return list(dict.fromkeys(names))
 
 
@@ -319,46 +448,17 @@ def _excluded_from_main_board():
 
 
 def set_main_board_color(hex_color):
-    """'Main Board' means every colorable key in block "keys" EXCEPT
-    the keys that belong to their own dedicated group buttons
-    (F1-F12, Numpad, Nav Cluster) -- NOT literally every key.
-
-    Real correction found via the user's own testing, not assumed:
-    Win/Alt/AltGr/Menu/right-Ctrl/right-Shift have no INDIVIDUAL LED
-    (confirmed empirically much earlier -- they never appear in
-    get-leds's per-key listing, and addressing them by name is
-    rejected), but they DO respond to the whole-block "all=" fill --
-    confirmed live: sending all=00ff00 turned them green along with
-    everything else. Different underlying HID++ function
-    (keyleds_set_led_block, a uniform block fill) than per-key
-    directives (keyleds_set_leds) -- keyledsctl's "all=" keyword uses
-    the block-fill function, confirmed by reading
-    keyledsctl_set_leds.c's real source directly.
-
-    So Main Board now reaches those keys too: snapshot F1-F12/Numpad/
-    Nav Cluster's CURRENT colors first, do the whole-block fill
-    (which reaches everything including the previously-unreachable
-    keys), then restore just those three groups back to what they
-    were -- undoing the fill's side effect on the keys that have their
-    own dedicated buttons, without losing the ability to color
-    everything else."""
+    """'Main Board' = every key in block "keys" except the ones with
+    their own zone button (F1-F12, Numpad, Nav Cluster). Sent as one
+    plain per-key write. This used to be a whole-board "all=" fill
+    followed by restoring the other three zones from a read-back,
+    because the modifiers were thought to be reachable no other way --
+    that flashed the other zones and could put stale colours back."""
     excluded = _excluded_from_main_board()
-
-    current = _get_block_colors("keys")
-    if not current:
+    names = [k for k in _all_key_names("keys") if k not in excluded]
+    if not names:
         return False, "Couldn't read the current key list from the device."
-    preserve = {k: v for k, v in current.items() if k in excluded}
-
-    ok, err = _run_set_leds("keys", [f"all={hex_color}"])
-    if not ok:
-        return False, err
-
-    if preserve:
-        restore_directives = [f"{k}={v.lstrip('#')}" for k, v in preserve.items()]
-        ok, err = _run_set_leds("keys", restore_directives)
-        if not ok:
-            return False, f"Fill succeeded but restoring F1-F12/Numpad/Nav Cluster failed: {err}"
-    return True, None
+    return _run_set_leds("keys", [f"{k}={hex_color}" for k in names])
 
 
 def set_group_color(group_name, hex_color):
@@ -370,13 +470,10 @@ def set_group_color(group_name, hex_color):
 
 
 def get_key_color(key_name, block="keys"):
-    if DEVICE is None:
+    if not _have_device():
         return None
     real_name = _real_key_name(block, key_name)
-    result = subprocess.run(
-        ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
-        capture_output=True, text=True,
-    )
+    result = _kctl("get-leds", "-b", block)
     if result.returncode != 0:
         return None
     for line in result.stdout.splitlines():
@@ -392,12 +489,9 @@ def _get_block_colors(block):
     """{real_key_name: hexcolor} for every key currently reported by
     the device in this block -- read-only, live query, same source as
     _all_key_names/get_key_color."""
-    if DEVICE is None:
+    if not _have_device():
         return {}
-    result = subprocess.run(
-        ["keyledsctl", "get-leds", "-d", DEVICE, "-b", block],
-        capture_output=True, text=True,
-    )
+    result = _kctl("get-leds", "-b", block)
     if result.returncode != 0:
         return {}
     colors = {}
@@ -406,6 +500,11 @@ def _get_block_colors(block):
             continue
         k, v = line.split("=", 1)
         colors[k] = v  # last one wins for the phantom duplicate BACKSLASH entry, harmless
+    if block == "keys" and colors:
+        colors.update(_get_extra_key_colors())
+        fixes = load_key_fix()
+        if fixes:
+            colors = {k: _unfix_color(k, v, fixes) for k, v in colors.items()}
     return colors
 
 
@@ -519,15 +618,17 @@ def load_profile(name):
         return False, f"No such profile: {name}", None
     snapshot, effect = _normalize_profile_entry(entry)
 
+    # Profiles saved before the six modifiers became readable (see
+    # EXTRA_KEYS) don't contain them: give those the profile's most
+    # common Main Board colour instead of leaving whatever was there.
     keys_colors = snapshot.get("keys")
     if keys_colors:
+        missing = [k for k in EXTRA_KEYS if k not in keys_colors]
         excluded = _excluded_from_main_board()
         main_board_colors = [v for k, v in keys_colors.items() if k not in excluded]
-        if main_board_colors:
+        if missing and main_board_colors:
             dominant = Counter(main_board_colors).most_common(1)[0][0]
-            ok, err = _run_set_leds("keys", [f"all={dominant.lstrip('#')}"])
-            if not ok:
-                return False, f"Failed pre-filling Main Board: {err}", None
+            snapshot = dict(snapshot, keys=dict(keys_colors, **{k: dominant for k in missing}))
 
     for block, colors in snapshot.items():
         if not colors:

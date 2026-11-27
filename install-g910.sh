@@ -144,11 +144,12 @@ Name=G910 Control
 Comment=Logitech G910 Orion Spectrum RGB + macro control
 Exec=python3 \"$DIR/src/g910_app.py\"
 Path=$DIR/src
-Icon=input-keyboard
+Icon=g910-control
 Terminal=false
 Categories=Utility;"
 
 mkdir -p "$HOME/Desktop"
+install -Dm644 packaging/g910-control/g910-control.svg "$HOME/.local/share/icons/hicolor/scalable/apps/g910-control.svg"
 echo "$DESKTOP_ENTRY" > "$HOME/Desktop/G910 Control.desktop"
 chmod +x "$HOME/Desktop/G910 Control.desktop"
 # GNOME/Nautilus also needs an explicit "trusted" flag or it shows an
