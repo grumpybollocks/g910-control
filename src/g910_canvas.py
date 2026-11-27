@@ -15,7 +15,6 @@ positions are ours -- no external source covers this keyboard's
 specific layout for those.
 """
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont, QPen
@@ -130,15 +129,6 @@ class Cell:
     height: float = 1.0
     block: str = "keys"  # "keys" / "gkeys" / "logo" / None (M-keys only, no
                           # bulk mechanism reaches them at all)
-    # False for Win/Alt/AltGr/Menu/right-Ctrl/right-Shift specifically:
-    # confirmed via direct live testing they have NO individual per-key
-    # LED (rejected by name, never appear in get-leds's per-key listing)
-    # but DO respond to the whole-block "all=" fill (keyleds_set_led_block,
-    # a different HID++ function than per-key set_leds -- confirmed via
-    # keyledsctl_set_leds.c's real source). So they're colorable via
-    # Main Board's bulk apply but can't be clicked individually on the
-    # canvas -- see set_main_board_color()'s docstring for the full fix.
-    individually_colorable: bool = True
 
 
 # --- M-keys + MR: smaller than a full key, tucked into the gap
@@ -263,26 +253,12 @@ _NAV_CLUSTER_KEYS = {c.key_name for c in NAV_CELLS if c.key_name}
 _GKEY_KEYS = {c.key_name for c in (GKEY_LEFT_CELLS + GKEY_TOP_CELLS) if c.key_name}
 _LOGO_KEYS = {c.key_name for c in LOGO_CELLS if c.key_name}
 # MAIN_CELLS never contains numpad/nav-cluster keys (those come from
-# separate lists), so this only needs to exclude F1-F12 -- and the "_"
-# prefixed placeholder names (inert cells with no real addressable LED
-# on this hardware, e.g. _LWIN/_RCTRL -- confirmed empirically much
-# earlier: only LCTRL/LSHIFT exist among modifiers). Those placeholders
-# exist purely so each inert cell can be individually selected for
-# visual highlighting -- they must NEVER be sent to keyledsctl, since
-# they aren't real key names it would accept.
+# separate lists), so this only needs to exclude F1-F12. Every
+# modifier is a real addressable key (see g910_backlight.EXTRA_KEYS).
 _MAIN_BOARD_KEYS = {
-    c.key_name for c in MAIN_CELLS
-    if c.key_name and c.key_name not in _FUNCTION_ROW_KEYS and not c.key_name.startswith("_")
-}
-# Visual-only: same as above but INCLUDING the inert placeholder cells,
-# so selecting "Main Board" highlights the whole physical area (Win/
-# Alt/AltGr/Menu/right-Ctrl/right-Shift included) even though those
-# specific keys can't actually receive a color.
-_MAIN_BOARD_VISUAL_KEYS = {
     c.key_name for c in MAIN_CELLS
     if c.key_name and c.key_name not in _FUNCTION_ROW_KEYS
 }
-
 ZONE_KEYS = {
     "Logo": _LOGO_KEYS,
     "G-Keys": _GKEY_KEYS,
@@ -292,21 +268,10 @@ ZONE_KEYS = {
     "Main Board": _MAIN_BOARD_KEYS,
 }
 
-# What gets HIGHLIGHTED when a zone is selected -- identical to
-# ZONE_KEYS except Main Board additionally highlights the inert
-# placeholder keys. Use this for canvas.select_keys(), and ZONE_KEYS
-# (only) for anything that actually applies/previews a color.
-ZONE_SELECTION_KEYS = dict(ZONE_KEYS)
-ZONE_SELECTION_KEYS["Main Board"] = _MAIN_BOARD_VISUAL_KEYS
-
-# Reverse of ZONE_SELECTION_KEYS: which zone a given key belongs to,
-# so clicking a key on the canvas can tell the sidebar to select the
-# matching zone in its list. Built from ZONE_SELECTION_KEYS (not
-# ZONE_KEYS) so the six individually-unaddressable Main Board keys
-# (Win/Alt/AltGr/etc) still resolve to "Main Board" even though they
-# can't be clicked to open a color picker themselves.
+# Which zone a given key belongs to, so clicking a key on the canvas
+# can tell the sidebar to select the matching zone in its list.
 KEY_TO_ZONE = {
-    key: zone for zone, keys in ZONE_SELECTION_KEYS.items() for key in keys
+    key: zone for zone, keys in ZONE_KEYS.items() for key in keys
 }
 
 # Colors -- dark, clean, simple. No logos, no glossy 3D key art.
@@ -353,33 +318,21 @@ class KeyboardCanvas(QWidget):
     def sync_from_device(self):
         """Query the device's ACTUAL current colors and populate the
         preview from them, so the app reflects real state on open
-        instead of starting blank.
-
-        The six individually-unaddressable keys (Win/Alt/AltGr/Menu/
-        right-Ctrl/right-Shift) never appear in the device's per-key
-        report -- confirmed empirically, see the Cell dataclass comment
-        -- so we can't read their real color directly. But we know how
-        they're actually colored in practice: Main Board's "all=" bulk
-        fill (keyleds_set_led_block) reaches them too, and nothing else
-        does. So on sync we approximate their color as the most common
-        color among the rest of the (individually-addressable) Main
-        Board keys -- exactly right after a solid fill, which is the
-        only way these keys get colored at all today."""
+        instead of starting blank."""
         live = bl.get_all_live_colors()
         for name, hexcolor in live.items():
             self._colors[name] = QColor(hexcolor)
 
-        main_board_colors = [
-            self._colors[c.key_name] for c in ALL_CELLS
-            if c.block == "keys" and c.individually_colorable
-            and c.key_name in self._colors
-        ]
-        if main_board_colors:
-            counts = Counter(c.name() for c in main_board_colors)
-            dominant = QColor(counts.most_common(1)[0][0])
-            for c in ALL_CELLS:
-                if c.block == "keys" and not c.individually_colorable:
-                    self._colors[c.key_name] = dominant
+        # The six modifiers come from a best-effort libkeyleds read. If
+        # it failed, show them in the board's most common colour rather
+        # than grey (they're almost always part of a solid fill).
+        missing = [k for k in bl.EXTRA_KEYS if k not in live]
+        board = [live[c.key_name] for c in ALL_CELLS
+                 if c.block == "keys" and c.key_name in live]
+        if missing and board:
+            dominant = QColor(max(set(board), key=board.count))
+            for k in missing:
+                self._colors[k] = dominant
 
         self.update()
 
@@ -494,7 +447,7 @@ class KeyboardCanvas(QWidget):
         sel = self._drag_rect.normalized()
         new_sel = set()
         for cell in ALL_CELLS:
-            if cell.block is None or not cell.individually_colorable:
+            if cell.block is None:
                 continue
             if sel.intersects(self._cell_rect(cell)):
                 new_sel.add(cell.key_name)

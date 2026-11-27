@@ -47,7 +47,7 @@ import evdev
 from evdev import ecodes
 
 import g910_backlight as bl
-from g910_canvas import KeyboardCanvas, ZONE_KEYS, ZONE_SELECTION_KEYS, PRESET_COLORS, ALL_CELLS
+from g910_canvas import KeyboardCanvas, ZONE_KEYS, PRESET_COLORS, ALL_CELLS
 
 from g910_macro_daemon import MACROS_FILE, load_macros, save_macro, clear_macro, clean_sequence
 
@@ -248,12 +248,9 @@ class EffectThread(QThread):
     its own thread -- same reasoning as RecorderThread/the macro
     daemon's replay(): real per-tick timing measured live on actual
     hardware before this was written (a single-group set-leds call
-    ~20ms, a full per-key Main Board sweep ~32ms, Main Board's uniform
-    "all=" fill -- the only path that reaches the six individually-
-    unaddressable keys, so it's what Breathing/Colour Cycle use there
-    -- ~114ms). All comfortably fast enough for these effects' actual
-    tick intervals, but 114ms would visibly stall the rest of the GUI
-    every tick if run directly on a QTimer on the main thread instead.
+    ~20ms, a full per-key Main Board sweep ~32ms). Fast enough for
+    these effects' tick intervals, but still enough to stall the GUI
+    every tick if run directly on a QTimer on the main thread.
 
     apply_fn(hexcolor) -> (ok, err): how Breathing/Colour Cycle send a
     single colour to the real target (reuses ColorModeSidebar's own
@@ -265,9 +262,8 @@ class EffectThread(QThread):
 
     # Base pacing at speed_pct=100, and a floor per kind so the Speed
     # slider can never ask this thread to out-run what was actually
-    # measured on real hardware this session (Main Board's whole-block
-    # "all=" fill -- what Breathing/Cycle use there -- ~114ms; a full
-    # per-key sweep, what Wave uses -- ~32ms on Main Board's 62 keys).
+    # measured on real hardware (a full per-key sweep is ~32ms on
+    # Main Board's 62 keys; the floors leave plenty of margin).
     # One conservative floor per kind, not a precise per-target one:
     # smaller zones could safely go faster, but erring toward "never
     # spams the device" is a better default than being precise about it.
@@ -397,7 +393,7 @@ class ColorModeSidebar(QWidget):
             self.target_buttons[name] = btn
         layout.addLayout(zone_grid)
         self.target_buttons[self.current_target].setChecked(True)
-        self.canvas.select_keys(ZONE_SELECTION_KEYS[self.current_target])
+        self.canvas.select_keys(ZONE_KEYS[self.current_target])
 
         layout.addSpacing(8)
         bright_row = QHBoxLayout()
@@ -485,10 +481,7 @@ class ColorModeSidebar(QWidget):
         # from live use: Breathing/Colour Cycle/Rainbow Wave stacked
         # directly under Rainbow made the whole sidebar look like one
         # undifferentiated pile of buttons, and an effect left running
-        # was easy to lose track of. Marked WIP because the on-screen
-        # preview for Main Board's six individually-unaddressable keys
-        # can still drift from the real keyboard during an animation --
-        # unlike the one-shot Rainbow/preset applies, which are solid.
+        # was easy to lose track of.
         effects_tab = QWidget()
         elayout = QVBoxLayout(effects_tab)
         elayout.setContentsMargins(6, 10, 6, 6)
@@ -567,7 +560,7 @@ class ColorModeSidebar(QWidget):
         self.current_target = name
         for n, btn in self.target_buttons.items():
             btn.setChecked(n == name)
-        self.canvas.select_keys(ZONE_SELECTION_KEYS[name])
+        self.canvas.select_keys(ZONE_KEYS[name])
 
     def sync_target(self, name):
         """Called when the CANVAS itself is clicked (a key/cluster),
@@ -628,14 +621,7 @@ class ColorModeSidebar(QWidget):
         scaled = scale_color(color, self.brightness_pct)
         self._set_preview_style(scaled)
         hexcolor = scaled.name().lstrip("#")
-        # ZONE_SELECTION_KEYS, not ZONE_KEYS: for Main Board this also
-        # includes Win/Alt/AltGr/Menu/right-Ctrl/right-Shift, which
-        # DO get reached by the real apply (set_main_board_color's
-        # whole-block fill, confirmed via live testing) even though
-        # they can't be addressed individually -- using ZONE_KEYS here
-        # would leave the canvas preview wrong (still grey) for keys
-        # that actually did change color on the real hardware.
-        preview_keys = ZONE_SELECTION_KEYS[self.current_target]
+        preview_keys = ZONE_KEYS[self.current_target]
 
         ok, err = self._apply_zone(self.current_target, hexcolor)
         if ok:
@@ -670,12 +656,7 @@ class ColorModeSidebar(QWidget):
     def on_apply_rainbow(self):
         """Sweeps a rainbow gradient across the selected zone's own
         keys, in the same left-to-right/top-to-bottom order they're
-        declared in g910_canvas.ALL_CELLS. For Main Board specifically,
-        also gives the six individually-unaddressable keys (Win/Alt/
-        AltGr/Menu/right-Ctrl/right-Shift) the gradient's first hue via
-        set_main_board_rainbow's whole-block fill, instead of leaving
-        them at a stale colour -- previously this just skipped them
-        entirely, which is the "grey keys" bug reported repeatedly.
+        declared in g910_canvas.ALL_CELLS.
 
         phase is randomised on every click (requested explicitly) so
         repeat clicks give a genuinely different-looking sweep instead
@@ -689,10 +670,7 @@ class ColorModeSidebar(QWidget):
         real_names = [bl._real_key_name(block, k) for k in ordered_keys]
         phase = random.random()
 
-        if target == "Main Board":
-            ok, err = bl.set_main_board_rainbow(real_names, brightness_pct=self.brightness_pct, phase=phase)
-        else:
-            ok, err = bl.set_keys_rainbow(block, real_names, brightness_pct=self.brightness_pct, phase=phase)
+        ok, err = bl.set_keys_rainbow(block, real_names, brightness_pct=self.brightness_pct, phase=phase)
 
         if ok:
             # Calling rainbow_hexes() again with the identical
@@ -702,21 +680,8 @@ class ColorModeSidebar(QWidget):
             # hardware.
             hexes = bl.rainbow_hexes(len(ordered_keys), brightness_pct=self.brightness_pct, phase=phase)
             preview = {name: QColor(f"#{h}") for name, h in zip(ordered_keys, hexes)}
-            fill_count = 0
-            if target == "Main Board" and hexes:
-                fill_color = QColor(f"#{hexes[0]}")
-                extra_keys = ZONE_SELECTION_KEYS[target] - wanted
-                for name in extra_keys:
-                    preview[name] = fill_color
-                fill_count = len(extra_keys)
             self.canvas.set_colors_map(preview)
-            if fill_count:
-                self.status_label.setText(
-                    f"{target} set to random colours ({len(ordered_keys)} keys + "
-                    f"{fill_count} whole-board-fill keys, {self.brightness_pct}%)"
-                )
-            else:
-                self.status_label.setText(f"{target} set to random colours ({len(ordered_keys)} keys, {self.brightness_pct}%)")
+            self.status_label.setText(f"{target} set to random colours ({len(ordered_keys)} keys, {self.brightness_pct}%)")
         else:
             self.status_label.setText(f"FAILED: {err}")
 
@@ -739,19 +704,7 @@ class ColorModeSidebar(QWidget):
         self._stop_effect()
         target = self.current_target
         block = self._TARGET_BLOCK[target]
-        # Breathing/Cycle go through _apply_zone -> set_main_board_color,
-        # which DOES reach Main Board's six individually-unaddressable
-        # keys via its whole-block "all=" fill (same reasoning
-        # _apply_color's own comment already documents for the static
-        # case) -- so their preview should use ZONE_SELECTION_KEYS, same
-        # as the static apply. Wave sends real per-key directives
-        # directly and genuinely never reaches those six keys, so it
-        # keeps ZONE_KEYS. Using ZONE_KEYS for all three (the bug found
-        # from a real screenshot: those six keys visibly stuck at a
-        # stale colour during Colour Cycle while the rest of the board
-        # updated) was the preview silently under-covering what
-        # Breathing/Cycle's own real apply actually reaches.
-        wanted = ZONE_SELECTION_KEYS[target] if kind in ("breathing", "cycle") else ZONE_KEYS[target]
+        wanted = ZONE_KEYS[target]
         ordered_keys = [c.key_name for c in ALL_CELLS if c.key_name in wanted]
         real_names = [bl._real_key_name(block, k) for k in ordered_keys]
 

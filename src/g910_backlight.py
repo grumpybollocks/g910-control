@@ -342,26 +342,13 @@ def set_keys_rainbow(block, real_key_names, brightness_pct=100, phase=0.0):
     """Applies a rainbow gradient across real_key_names (already real
     keyledsctl names, already in the caller's intended visual order)
     in one block, one keyledsctl call. Generic building block reused
-    for both the fixed GROUPS zones and Main Board -- unlike
-    set_main_board_color, this never needs the whole-block "all="
-    fill + restore dance: a rainbow has no single colour to give the
-    six individually-unaddressable keys anyway, so this only ever
-    touches keys that can actually take an individual colour, and
-    leaves the rest showing whatever they already had -- same as any
-    other per-key-only apply elsewhere in this module. phase forwards
+    for both the fixed GROUPS zones and Main Board. phase forwards
     straight to rainbow_hexes() -- see there for what it does."""
     if not real_key_names:
         return False, "No keys to colour."
     hexes = rainbow_hexes(len(real_key_names), brightness_pct, phase)
     directives = [f"{k}={h}" for k, h in zip(real_key_names, hexes)]
     return _run_set_leds(block, directives)
-
-
-def set_main_board_rainbow(real_key_names, brightness_pct=100, phase=0.0):
-    """Kept as its own name for callers; every Main Board key is
-    individually addressable (see EXTRA_KEYS), so this is just a plain
-    per-key gradient with no whole-board fill and nothing to restore."""
-    return set_keys_rainbow("keys", real_key_names, brightness_pct, phase)
 
 
 def _real_key_name(block, key_name):
@@ -424,10 +411,17 @@ def _get_extra_key_colors():
     return {name: by_id[0xe2 + i] for i, name in enumerate(EXTRA_KEYS) if 0xe2 + i in by_id}
 
 
+_KEY_NAMES_CACHE = {}
+
+
 def _all_key_names(block="keys"):
     """Every key name in a block: the device's own live list (deduped,
     it lists BACKSLASH twice) plus, for "keys", the six modifiers its
-    listing cuts off (see EXTRA_KEYS)."""
+    listing cuts off (see EXTRA_KEYS). The list is fixed by the
+    hardware, so it is read once and cached: effects call this every
+    frame and shouldn't pay for an extra device read each time."""
+    if block in _KEY_NAMES_CACHE:
+        return list(_KEY_NAMES_CACHE[block])
     if not _have_device():
         return []
     result = _kctl("get-leds", "-b", block)
@@ -436,7 +430,10 @@ def _all_key_names(block="keys"):
     names = [line.split("=", 1)[0] for line in result.stdout.splitlines() if "=" in line]
     if block == "keys":
         names += EXTRA_KEYS
-    return list(dict.fromkeys(names))
+    names = list(dict.fromkeys(names))
+    if names:
+        _KEY_NAMES_CACHE[block] = names
+    return list(names)
 
 
 def _excluded_from_main_board():
@@ -513,12 +510,9 @@ def get_all_live_colors():
     the GUI to sync its preview to the device's ACTUAL current state
     on startup. Translates device names back to our friendly ones for
     gkeys/logo (device reports x01..x09, our canvas uses G1../LOGO1/2)
-    -- reverse of GKEY_NAMES/LOGO_NAMES. The six individually-
-    unaddressable keys (Win/Alt/AltGr/Menu/right-Ctrl/right-Shift)
-    can't be included here at all -- the device genuinely doesn't
-    report an individual color for them (confirmed empirically), so
-    the GUI has no way to know their current state short of guessing,
-    which we don't do."""
+    -- reverse of GKEY_NAMES/LOGO_NAMES. Includes the six modifiers
+    (EXTRA_KEYS) when libkeyleds can read them; get-leds doesn't list
+    them, and the read is best-effort, so callers must cope without."""
     combined = {}
     for block in PROFILE_BLOCKS:
         colors = _get_block_colors(block)
@@ -593,21 +587,7 @@ def load_profile(name):
     names from the live query, not our friendly G1../LOGO1 aliases) --
     no _real_key_name() translation needed on the way back out.
 
-    The six individually-unaddressable keys (Win/Alt/AltGr/Menu/
-    right-Ctrl/right-Shift) were never captured in the snapshot in the
-    first place -- get-leds never reports them, see
-    _excluded_from_main_board's callers -- so without help they'd just
-    keep whatever color was on the device before the load, silently
-    diverging from the saved profile. Same fix as set_main_board_color:
-    before writing the snapshot's exact per-key colors, fill block
-    "keys" with the dominant color among the snapshot's own Main Board
-    keys (the most common color there is, by definition, what the
-    whole board was last bulk-filled to when the profile was saved).
-    That reaches the six unaddressable keys the only way they CAN be
-    reached. The per-key directives applied right after override the
-    fill for every individually addressable key back to its exact
-    saved color, so nothing else is approximated -- only the keys that
-    have no other option. Returns (ok, err, effect) -- effect is
+    Returns (ok, err, effect) -- effect is
     whatever was saved alongside this profile (or None, including for
     every profile saved before this feature existed), so the caller
     can decide whether to resume an animation on top of the static
@@ -619,8 +599,9 @@ def load_profile(name):
     snapshot, effect = _normalize_profile_entry(entry)
 
     # Profiles saved before the six modifiers became readable (see
-    # EXTRA_KEYS) don't contain them: give those the profile's most
-    # common Main Board colour instead of leaving whatever was there.
+    # EXTRA_KEYS), or saved while that best-effort read failed, don't
+    # contain them: give those the profile's most common Main Board
+    # colour instead of leaving whatever was there.
     keys_colors = snapshot.get("keys")
     if keys_colors:
         missing = [k for k in EXTRA_KEYS if k not in keys_colors]

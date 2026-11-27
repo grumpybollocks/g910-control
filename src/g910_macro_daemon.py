@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Watches the G910's G1-G9/M1-M3/MR via raw HID++ reports on the
-keyboard's HID++ hidraw interface (DEVICE_PATH, see g910_backlight.py
+keyboard's HID++ hidraw interface (found by g910_backlight._find_device
 -- no evdev keycodes exist for these -- confirmed empirically, see
 G910_README.md's G-KEY/M-KEY/MR PROTOCOL section) and replays recorded
 macros via ydotool. Mirrors the sibling G510s project's
@@ -33,7 +33,6 @@ from pathlib import Path
 import g910_backlight as bl
 
 MACROS_FILE = bl.DATA_DIR / "g910_macros.json"
-DEVICE_PATH = bl.DEVICE  # discovered dynamically -- see g910_backlight.py's _find_device()
 
 # Real bug found and fixed via a live diagnostic capture: a single real
 # G5 press was followed by clean press/release pairs repeating every
