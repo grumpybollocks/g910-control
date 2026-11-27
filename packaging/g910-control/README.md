@@ -292,6 +292,16 @@ round trip, SIGTERM clears the record state. Real build against the
 live `g910-v1.16` URL, `namcap` clean (added `hicolor-icon-theme` for
 the new icon), extracted-package personal-data audit clean.
 
+**v1.17** (LED fault guide and tools, dead-code cleanup): removes the
+leftover "unaddressable modifier" code paths, caches the key list so
+Breathing/Colour Cycle on Main Board stop re-reading the device every
+frame, and restores the dominant-colour fallback for the modifiers.
+Adds `docs/LED_FAULTS.md` and `tools/` (three-colour LED test, raw
+HID++ writer, numpad block, mask presets), all run on real hardware.
+Effects verified on every zone: animate, no leakage, clean stop. Real
+build against the live `g910-v1.17` URL, `namcap` clean,
+extracted-package personal-data audit clean.
+
 ## Before real AUR submission (not done yet, needs the user's go-ahead)
 
 - Generate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
